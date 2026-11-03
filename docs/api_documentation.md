@@ -57,12 +57,21 @@ Strategy keys: `constellation`, `ai_strat`, `mean_reversion`, `custom_btc`, `cus
 | POST | `/ai/train` | `{kind: logreg\|gbm, days}` → `{ok, version, activated, metrics}` or `{ok: false, reason}` |
 | WS | `/ws/signals` | Auth frame first. Then a `{"type":"signal", strategy, asset, side, status, code, reason, price, confidence, secs_in, ts}` for each recorded decision |
 
+## Implemented (Phase 6): portfolio and execution
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/portfolio?mode=paper\|live` | `{cash, positions_value, equity, invested, realized_pnl, unrealized_pnl, today_realized, trades, wins, win_rate, open_positions, peak_equity, drawdown_pct}`. The mode defaults to the user's current one |
+| GET | `/positions?mode=&status=open\|closed\|all` | Shares, cost basis (incl. fees), avg price, bid, value, unrealized/realized P&L, DCA steps, and the reconciled exchange shares (live) |
+| GET | `/orders?mode=&limit=` | Purpose (entry/dca/stop/take_profit), type, limit, requested, filled, fees, status, error, and fills with their on-chain status |
+| GET | `/trades?mode=&asset=&strategy=&result=won\|lost\|stopped\|sold&from=&to=` | Closed round trips: entry, exit, shares, cost, proceeds, fees, P&L, duration |
+| GET | `/wallet/balance` | Live USDC collateral balance (409 when live isn't active) |
+| WS | `/ws/portfolio` | Auth frame first. Then `order`, `position` (opened/dca/settled), `portfolio` and `emergency` events |
+
 ## Planned contracts (added in the phase that makes them real)
 
 | Phase | Endpoint | Purpose |
 |---|---|---|
-| 6 | `GET /portfolio`, `/positions`, `/orders`, `/trades?asset=&strategy=&from=&to=&result=` | Book of record |
-| 6 | `WS /ws/orders`, `/ws/positions`, `/ws/portfolio` | Lifecycle updates |
 | 7 | `POST /backtests`, `GET /backtests/{id}`, `GET /analytics` | Backtests and metrics |
 
 WebSocket auth: the client sends `{"type":"auth","token":"…"}` as its first frame. The server

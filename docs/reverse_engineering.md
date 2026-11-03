@@ -122,12 +122,12 @@ also says "Agreement scan at T+90s" and "Analyze (T+90–150s)".
 | BTC & ETH rules (Simple/Advanced) | Momentum vs thresholds, band, hours, streak | Same | ✅ v0 | – |
 | BTC regime filter | ±2% 1h shifts thresholds | Same rule (used by Constellation and Custom), plus a standalone z-score mean-reversion strategy | ✅ Phase 5 | Exact NORMAL/other state names |
 | Pocket Aces | Fixed preset | Same | ✅ v0 | – |
-| DCA (off/capped/standard/confirm) | $5 → +$3 → +$2.50 at 9¢ drops; halt 110s before close | Tested planner with the same ladder and halt rule; executes in Phase 6 behind the risk engine | ✅ planner / ⏳ execution | – |
-| Stop-loss | 0.20 default | Same, with an anti-dump floor and no stops in the last 20s | ✅ v0 | Reference exit-order type |
+| DCA (off/capped/standard/confirm) | $5 → +$3 → +$2.50 at 9¢ drops; halt 110s before close | Same ladder and halt rule, executed through the risk engine | ✅ Phase 6 | – |
+| Stop-loss | 0.20 default | Same, with an anti-dump floor and no stops in the last 20s; plus an optional take-profit | ✅ Phase 6 | Reference exit-order type |
 | Streak reversal | N same outcomes → fade | Same | ✅ v0 | – |
 | Logs (All/Trades/Skips/Errors) | Activity log | `/logs` page + `GET /api/logs` with category filters and paging (engine writes entries from Phase 5) | ✅ Phase 3 | – |
 | Signal Desk | Public live and history JSON | `/signals`: live six-coin gate preview from real prices + your saved Constellation config; logged history in Phase 5 | ✅ preview / ⏳ history | – |
-| Settled P&L | Data API closed positions | Reconcile against the Data API `/positions` and `/closed-positions` | ⏳ Phase 6 | – |
+| Settled P&L | Data API closed positions | P&L from our own fills after fees; live positions reconciled every 60s against Data API v2 `/v2/positions` (v1 is retired) | ✅ Phase 6 | – |
 | Wallet link | **Private key POSTed to *their* server** | Same in-website flow (key + Polymarket address), but it POSTs only to **your own** backend, which encrypts it at rest (Fernet/MASTER_KEY) and never returns or logs it. See architecture.md | ✅ Phase 2 | – |
 | AI onboarding / Ask AI | Free text → config | Optional; needs an LLM API key | ⏳ optional | Their prompt |
 | Platform fees / platform stats | Marketing | Not applicable (self-hosted) | 🚫 | – |
