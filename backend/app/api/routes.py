@@ -12,7 +12,7 @@ from app.api.deps import current_user, login_limit, sensitive_limit
 from app.core.config import get_settings
 from app.core.security import make_token, verify_password
 from app.database.session import get_db
-from app.models import Strategy, StrategyConfiguration, Trade, User, UserSettings
+from app.models import ExecutionLog, Strategy, StrategyConfiguration, Trade, User, UserSettings
 from app.schemas import (AcceptanceCriteria, LoginIn, RiskSettings, SettingsIn, SettingsOut, StrategyOut,
                          StrategyParamsIn, TokenOut, WalletIn, WalletOut)
 from app.services import wallet as wallet_svc
@@ -181,11 +181,13 @@ async def paper_track_record(db: AsyncSession, user_id) -> dict:
     q = select(func.count(), func.min(Trade.closed_at),
                func.coalesce(func.sum(Trade.pnl).filter(Trade.pnl > 0), 0),
                func.coalesce(-func.sum(Trade.pnl).filter(Trade.pnl < 0), 0),
-               func.count().filter(Trade.pnl > 0)).where(Trade.user_id == user_id, Trade.mode == "paper")
-    n, first, gross_win, gross_loss, wins = (await db.execute(q)).one()
+               func.count().filter(Trade.pnl > 0),
+               func.coalesce(func.sum(Trade.pnl), 0)).where(Trade.user_id == user_id, Trade.mode == "paper")
+    n, first, gross_win, gross_loss, wins, pnl = (await db.execute(q)).one()
     days = (dt.datetime.now(dt.UTC) - first).total_seconds() / 86400 if first else 0
-    return {"trades": n, "days": round(days, 2), "win_rate": (wins / n) if n else 0,
-            "profit_factor": float(gross_win / gross_loss) if gross_loss else (float("inf") if gross_win else 0)}
+    return {"trades": n, "wins": wins, "pnl": float(pnl), "days": round(days, 2), "win_rate": (wins / n) if n else 0,
+            # JSON has no Infinity: a record with wins and no losses reports a large sentinel
+            "profit_factor": float(gross_win / gross_loss) if gross_loss else (999.0 if gross_win else 0.0)}
 
 
 @router.get("/live-trading/readiness")
@@ -242,6 +244,33 @@ async def emergency_clear(user: User = Depends(current_user), db: AsyncSession =
     us.emergency_stopped = False
     await db.commit()
     return _settings_out(us)
+
+
+LOG_CATEGORIES = {
+    "all": None,
+    "trades": ("order", "fill", "position", "settle"),
+    "skips": ("skip", "risk"),
+    "signals": ("signal",),
+    "errors": None,
+    "system": ("system",),
+}
+
+
+@router.get("/logs")
+async def logs(category: str = "all", before_id: int | None = None, limit: int = 100,
+               user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    if category not in LOG_CATEGORIES:
+        raise HTTPException(400, f"category must be one of {sorted(LOG_CATEGORIES)}")
+    q = select(ExecutionLog).where((ExecutionLog.user_id == user.id) | (ExecutionLog.user_id.is_(None)))
+    if category == "errors":
+        q = q.where(ExecutionLog.level == "error")
+    elif LOG_CATEGORIES[category]:
+        q = q.where(ExecutionLog.category.in_(LOG_CATEGORIES[category]))
+    if before_id:
+        q = q.where(ExecutionLog.id < before_id)
+    rows = (await db.execute(q.order_by(ExecutionLog.id.desc()).limit(max(1, min(limit, 500))))).scalars()
+    return [{"id": r.id, "ts": r.ts.isoformat(), "level": r.level, "category": r.category,
+             "message": r.message, "data": r.data} for r in rows]
 
 
 @router.get("/time")

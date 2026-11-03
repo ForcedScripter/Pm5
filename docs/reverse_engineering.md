@@ -125,13 +125,13 @@ also says "Agreement scan at T+90s" and "Analyze (T+90–150s)".
 | DCA (off/capped/standard/confirm) | $5 → +$3 → +$2.50 at 9¢ drops; halt 110s before close | Same, behind the shared risk engine | ✅ v0 (halt rule ⏳) | – |
 | Stop-loss | 0.20 default | Same, with an anti-dump floor and no stops in the last 20s | ✅ v0 | Reference exit-order type |
 | Streak reversal | N same outcomes → fade | Same | ✅ v0 | – |
-| Logs (All/Trades/Skips/Errors) | Activity log | Structured lifecycle log, including skips and reasons | partial v0 | – |
-| Signal Desk | Public live and history JSON | `/signals` page from our own engine | ⏳ | – |
+| Logs (All/Trades/Skips/Errors) | Activity log | `/logs` page + `GET /api/logs` with category filters and paging (engine writes entries from Phase 5) | ✅ Phase 3 | – |
+| Signal Desk | Public live and history JSON | `/signals`: live six-coin gate preview from real prices + your saved Constellation config; logged history in Phase 5 | ✅ preview / ⏳ history | – |
 | Settled P&L | Data API closed positions | Reconcile against the Data API `/positions` and `/closed-positions` | ⏳ Phase 6 | – |
 | Wallet link | **Private key POSTed to *their* server** | Same in-website flow (key + Polymarket address), but it POSTs only to **your own** backend, which encrypts it at rest (Fernet/MASTER_KEY) and never returns or logs it. See architecture.md | ✅ Phase 2 | – |
 | AI onboarding / Ask AI | Free text → config | Optional; needs an LLM API key | ⏳ optional | Their prompt |
 | Platform fees / platform stats | Marketing | Not applicable (self-hosted) | 🚫 | – |
-| Visual design | §2 tokens and layout | Same layout, structure and color system under our own name and logo | ⏳ Phase 3 | Their logo and brand assets (not copied) |
+| Visual design | §2 tokens and layout | Same layout (ticker, pill nav, 3-column Terminal, tabbed strategy config), same token system, under our own name and logo. Screenshots: `docs/screenshots/` | ✅ Phase 3 | Their logo and brand assets (not copied) |
 
 ## 5. What v0 (`pm5bot`, already built and running in paper mode) proved
 

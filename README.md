@@ -14,8 +14,9 @@ console; see `docs/reverse_engineering.md`.
 |---|---|
 | 1. Reference investigation | ✅ `docs/reverse_engineering.md` |
 | 2. Architecture, DB, API core, Docker | ✅ `docs/architecture.md`, `docs/api_documentation.md` |
-| 3. Frontend | next |
-| 4–8. Market data → strategies → execution → backtesting → hardening | planned |
+| 3. Frontend | ✅ Terminal, Settings (wallet, strategies, risk, live gate), Logs, Signals · `docs/screenshots/` |
+| 4. Market infrastructure | next |
+| 5–8. Strategies → execution → backtesting → hardening | planned |
 
 `legacy_v0/` holds the first single-file bot. It already paper-trades end to end, and it's
 the reference for porting strategy logic in Phase 5.
@@ -25,8 +26,15 @@ the reference for porting strategy logic in Phase 5.
 ```bash
 cp .env.example .env      # then fill in MASTER_KEY, JWT_SECRET, ADMIN_PASSWORD, POSTGRES_PASSWORD
 docker compose up -d --build
-curl localhost:8000/api/health
 ```
+
+Open http://127.0.0.1:8080 and sign in as `admin` with your `ADMIN_PASSWORD`. Both ports bind to
+localhost only. For remote access, use an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 you@server`)
+or a TLS reverse proxy. Never expose the console over plain HTTP, because the wallet key is
+entered there.
+
+Frontend dev: `cd frontend && npm install && npm run dev` (proxies `/api` to `:8000`).
+Tests: `npx vitest run` (unit) and `ADMIN_PASSWORD=… node e2e/smoke.cjs` (end-to-end).
 
 ## Develop and test
 

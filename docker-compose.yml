@@ -37,6 +37,13 @@ services:
     ports: ["127.0.0.1:8000:8000"]
     restart: unless-stopped
 
+  frontend:
+    build: { context: ., dockerfile: infrastructure/docker/frontend.Dockerfile }
+    depends_on: [backend]
+    # the console: open http://127.0.0.1:8080 (put a TLS proxy in front for remote access)
+    ports: ["127.0.0.1:8080:8080"]
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:

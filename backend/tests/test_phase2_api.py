@@ -132,3 +132,19 @@ async def test_settings_roundtrip(client, auth):
     assert r.json()["risk"]["max_daily_loss_usd"] == 25 and r.json()["paper_bankroll"] == 300
     bad = cur["risk"] | {"max_spread": 2}
     assert (await client.post("/api/settings", headers=auth, json={"risk": bad})).status_code == 422
+
+
+async def test_logs_filtering(client, auth):
+    from app.models import ExecutionLog
+    async with SessionLocal() as db:
+        db.add_all([ExecutionLog(level="info", category="order", message="BUY BTC UP"),
+                    ExecutionLog(level="info", category="skip", message="skip: spread"),
+                    ExecutionLog(level="error", category="order", message="rejected")])
+        await db.commit()
+    all_ = (await client.get("/api/logs", headers=auth)).json()
+    assert [x["message"] for x in all_][:3] == ["rejected", "skip: spread", "BUY BTC UP"]
+    assert {x["message"] for x in (await client.get("/api/logs?category=skips", headers=auth)).json()} == {"skip: spread"}
+    assert {x["message"] for x in (await client.get("/api/logs?category=errors", headers=auth)).json()} == {"rejected"}
+    page = (await client.get(f"/api/logs?before_id={all_[0]['id']}", headers=auth)).json()
+    assert page[0]["message"] == "skip: spread"
+    assert (await client.get("/api/logs?category=nope", headers=auth)).status_code == 400
