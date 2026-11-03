@@ -127,50 +127,63 @@ class BookService:
     def book(self, token: str) -> OrderBook | None:
         return self.books.get(token)
 
+    # One connection per pair of assets. A single 12-token connection gets bursty enough
+    # (rollover, opening minutes) for Polymarket to drop it with 1013 "slow consumer".
+    SHARDS: tuple[tuple[str, ...], ...] = (("btc", "eth"), ("sol", "xrp"), ("doge", "bnb"))
+
+    def shard_tokens(self, assets: tuple[str, ...]) -> list[str]:
+        return sorted(t for a in assets if (m := self.registry.current.get(a)) for t in (m.up_token, m.down_token))
+
     async def run(self) -> None:
         sampler = asyncio.create_task(self._sampler())
-        backoff = 1.0
+        self._connected = 0
         try:
-            while not self._stop.is_set():
-                tokens = sorted(self.registry.token_set())
-                if not tokens:
-                    await asyncio.sleep(1)
-                    continue
-                # keep books for tokens still in play, start fresh ones for new tokens
-                self.books = {t: self.books.get(t) or OrderBook(t) for t in tokens}
-                for ob in self.books.values():
-                    ob.synced = False
-                self.registry.changed.clear()
-                try:
-                    # max_queue: keep draining the TCP socket into memory during brief stalls; the default (16 frames)
-                    # applies backpressure, the server's send buffer fills and it drops us with 1013 "slow consumer"
-                    async with websockets.connect(self.s.clob_ws, ping_interval=None, open_timeout=15, max_size=2**22,
-                                                  max_queue=20_000) as ws:
-                        await ws.send(json.dumps({"assets_ids": tokens, "type": "market"}))
-                        self.health.connected, backoff = True, 1.0
-                        log.info("clob ws subscribed to %d tokens", len(tokens))
-                        pinger = asyncio.create_task(self._ping(ws))
-                        try:
-                            await self._consume(ws)
-                        finally:
-                            pinger.cancel()
-                except (asyncio.TimeoutError, websockets.WebSocketException, OSError) as e:
-                    self.health.last_error = f"{type(e).__name__}: {e}"[:200]
-                    log.warning("clob ws dropped: %s", self.health.last_error)
-                    self.health.reconnects += 1
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, 30)
-                finally:
-                    self.health.connected = False
+            await asyncio.gather(*(self._run_shard(sh) for sh in self.SHARDS))
         finally:
             sampler.cancel()
+
+    async def _run_shard(self, assets: tuple[str, ...]) -> None:
+        backoff = 1.0
+        name = "+".join(assets)
+        while not self._stop.is_set():
+            tokens = self.shard_tokens(assets)
+            if not tokens:
+                await asyncio.sleep(1)
+                continue
+            for t in tokens:       # keep books for tokens still in play, start fresh ones for new tokens
+                self.books.setdefault(t, OrderBook(t)).synced = False
+            live = self.registry.token_set()
+            for t in [t for t in self.books if t not in live]:
+                self.books.pop(t, None)
+            try:
+                # max_queue: keep draining the TCP socket into memory during brief stalls; the default (16 frames)
+                # applies backpressure, the server's send buffer fills and it drops us with 1013 "slow consumer"
+                async with websockets.connect(self.s.clob_ws, ping_interval=None, open_timeout=15, max_size=2**22,
+                                              max_queue=20_000) as ws:
+                    await ws.send(json.dumps({"assets_ids": tokens, "type": "market"}))
+                    self._connected += 1
+                    self.health.connected, backoff = True, 1.0
+                    log.info("clob ws [%s] subscribed to %d tokens", name, len(tokens))
+                    pinger = asyncio.create_task(self._ping(ws))
+                    try:
+                        await self._consume(ws, assets, tokens)
+                    finally:
+                        pinger.cancel()
+                        self._connected -= 1
+                        self.health.connected = self._connected > 0
+            except (asyncio.TimeoutError, websockets.WebSocketException, OSError) as e:
+                self.health.last_error = f"[{name}] {type(e).__name__}: {e}"[:200]
+                log.warning("clob ws dropped: %s", self.health.last_error)
+                self.health.reconnects += 1
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30)
 
     async def _ping(self, ws) -> None:
         while True:
             await asyncio.sleep(10)
             await ws.send("PING")
 
-    async def _consume(self, ws) -> None:
+    async def _consume(self, ws, assets: tuple[str, ...] = (), tokens: list[str] | None = None) -> None:
         """Read until the token set changes (rollover), the feed goes quiet, or the socket drops.
 
         The hot loop must stay cheap: Polymarket disconnects slow readers with
@@ -179,7 +192,9 @@ class BookService:
         rollover = asyncio.Event()
 
         async def watch() -> None:
-            await self.registry.changed.wait()
+            # this shard's own tokens changed (rollover) → reconnect with the new ones
+            while self.shard_tokens(assets) == tokens:
+                await asyncio.sleep(0.5)
             rollover.set()
             await ws.close()
 
