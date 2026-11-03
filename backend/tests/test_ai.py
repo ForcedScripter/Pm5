@@ -151,3 +151,10 @@ async def test_training_end_to_end_on_synthetic_history(client):
     assert m["test"]["auc"] > 0.75
     coef = m["coefficients"]
     assert max(coef, key=lambda k: abs(coef[k])) in ("delta", "ret_60s", "ret_30s")   # learned the real driver
+
+
+def test_chrono_split_without_a_test_part():
+    ts = np.repeat(np.arange(5) * 300, 2)
+    ds = Dataset(np.zeros((10, 1)), np.zeros(10), ts, np.zeros(10), np.zeros(10), [str(t) for t in ts])
+    tr, va, te = chrono_split(ds, (0.8, 0.2))            # used by walk-forward training: train + calibration only
+    assert tr.sum() == 8 and va.sum() == 2 and te.sum() == 0

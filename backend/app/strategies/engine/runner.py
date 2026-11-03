@@ -25,7 +25,7 @@ from app.market_data.hub import ASSETS
 from app.execution.fees import net_pnl_per_dollar
 from app.models import ExecutionLog, Market, ModelPrediction, Signal, Strategy, StrategyConfiguration, UserSettings
 from app.strategies.ai.strategy import ai_strat
-from app.strategies.ai.training import active_model, train
+from app.strategies.ai.training import active_model
 from app.strategies.engine.base import AssetView, Book, Context, Decision, MarketView
 from app.strategies.engine.rules import RULE_STRATEGIES
 
@@ -248,11 +248,13 @@ class StrategyRunner:
 
     # ── AI retraining ───────────────────────────────────────────────────
     async def _retrainer(self) -> None:
+        """Retrain AI Strat periodically, in the batch WORKER PROCESS: dataset assembly over days of
+        history is CPU-heavy and stalled the live loop for seconds when it ran here."""
+        from app.backtesting import worker
         await asyncio.sleep(30)
         while not self._stop.is_set():
             try:
-                async with SessionLocal() as db:
-                    res = await train(db)
+                res = await (await worker.submit("ai_train", worker._train_job, "logreg", 3))
                 self.status["last_training"] = {"at": time.time(), "ok": res.get("ok"), "activated": res.get("activated"),
                                                 "reason": res.get("reason"), "version": res.get("version")}
                 self._model = (0, None)                          # reload on next use

@@ -16,7 +16,7 @@ from app.database.session import get_db
 from app.market_data.hub import hub
 from app.market_data.service import get_service
 from app.models import ExecutionLog, Market, MlModel, ModelPrediction, Signal, Strategy, StrategyConfiguration, User, UserSettings
-from app.strategies.ai.training import model_summary, train
+from app.strategies.ai.training import model_summary
 from app.strategies.catalog import CATALOG
 
 router = APIRouter(prefix="/api")
@@ -161,8 +161,11 @@ class TrainIn(BaseModel):
 
 
 @router.post("/ai/train", dependencies=[Depends(sensitive_limit)])
-async def ai_train(body: TrainIn, _: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
-    res = await train(db, kind=body.kind, days=body.days)
+async def ai_train(body: TrainIn, _: User = Depends(current_user)):
+    from app.backtesting import worker
+    if "ai_train" in worker.running:
+        raise HTTPException(409, "training is already running")
+    res = await (await worker.submit("ai_train", worker._train_job, body.kind, body.days))   # off the live process
     svc = get_service()
     if svc and getattr(svc, "runner", None):
         svc.runner._model = (0, None)

@@ -64,6 +64,19 @@ def _backtest_job(bt_id: str) -> None:
     run_isolated(lambda: service.run(uuid.UUID(bt_id)))
 
 
+def _train_job(kind: str, days: float) -> dict:
+    from app.database.session import run_isolated, sessions
+    from app.monitoring.logging import setup_logging
+    from app.strategies.ai.training import train
+    setup_logging()
+
+    async def go():
+        async with sessions()() as db:
+            return await train(db, kind=kind, days=days)
+
+    return run_isolated(go)
+
+
 # ── parent side ────────────────────────────────────────────────────────
 async def submit(job_id: str, fn, *args):
     running.add(job_id)

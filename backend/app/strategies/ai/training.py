@@ -120,7 +120,13 @@ def _assemble(markets, srcs, by_market, backfilled=frozenset()) -> Dataset:
 
 def chrono_split(ds: Dataset, frac=(0.6, 0.2)) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     rounds = np.unique(ds.market_ts)
-    a, b = rounds[int(len(rounds) * frac[0])], rounds[int(len(rounds) * (frac[0] + frac[1]))]
+    n = len(rounds)
+
+    def cut(f: float):   # first round of the next split; past-the-end when the fractions cover everything
+        i = int(n * f)
+        return rounds[i] if i < n else rounds[-1] + 1
+
+    a, b = cut(frac[0]), cut(frac[0] + frac[1])
     return ds.market_ts < a, (ds.market_ts >= a) & (ds.market_ts < b), ds.market_ts >= b
 
 
