@@ -117,12 +117,12 @@ also says "Agreement scan at T+90s" and "Analyze (T+90–150s)".
 | Market discovery (6 assets) | Slugs `{asset}-updown-5m-{start}` | Backend registry: current + next window, rollover, resolution tracking, stored in PG | ✅ Phase 4 (live-verified) | – |
 | Live spot feed | Binance WS / CoinGecko | Backend Binance collector (1s bars, book ticker, 24h) with REST backfill; stored in PG | ✅ Phase 4 | – |
 | Order books | Right-panel order book | Backend CLOB WS books (snapshot + deltas, live-verified), sampled to PG every 5s | ✅ Phase 4 | – |
-| Constellation | §3.2 | Same gates and parameters | ⏳ Phase 5 | Confidence formula, "boost" |
-| AI Strat | Weekly-retrained calibration model | Our own logistic regression + gradient boosting, trained only on our logged signals (chronological splits) | ⏳ Phase 5 | Their model and data (private) |
+| Constellation | §3.2 | Same gates and parameters, plus the BTC regime filter and streak reversal; every call scored on settlement | ✅ Phase 5 | Confidence formula (ours is a labelled heuristic), "boost" |
+| AI Strat | Weekly-retrained calibration model | Our own calibrated logreg/GBM trained on this server's history (chronological splits, no look-ahead); activated only if it beats market prices out of sample; retrained every 6h | ✅ Phase 5 | Their model and data (private) |
 | BTC & ETH rules (Simple/Advanced) | Momentum vs thresholds, band, hours, streak | Same | ✅ v0 | – |
-| BTC regime filter | ±2% 1h shifts thresholds | Same rule, plus optional z-score/vol extensions (the spec's "Mean Reversion") | ⏳ Phase 5 | Exact NORMAL/other state names |
+| BTC regime filter | ±2% 1h shifts thresholds | Same rule (used by Constellation and Custom), plus a standalone z-score mean-reversion strategy | ✅ Phase 5 | Exact NORMAL/other state names |
 | Pocket Aces | Fixed preset | Same | ✅ v0 | – |
-| DCA (off/capped/standard/confirm) | $5 → +$3 → +$2.50 at 9¢ drops; halt 110s before close | Same, behind the shared risk engine | ✅ v0 (halt rule ⏳) | – |
+| DCA (off/capped/standard/confirm) | $5 → +$3 → +$2.50 at 9¢ drops; halt 110s before close | Tested planner with the same ladder and halt rule; executes in Phase 6 behind the risk engine | ✅ planner / ⏳ execution | – |
 | Stop-loss | 0.20 default | Same, with an anti-dump floor and no stops in the last 20s | ✅ v0 | Reference exit-order type |
 | Streak reversal | N same outcomes → fade | Same | ✅ v0 | – |
 | Logs (All/Trades/Skips/Errors) | Activity log | `/logs` page + `GET /api/logs` with category filters and paging (engine writes entries from Phase 5) | ✅ Phase 3 | – |

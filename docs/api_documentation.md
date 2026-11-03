@@ -44,12 +44,23 @@ Strategy keys: `constellation`, `ai_strat`, `mean_reversion`, `custom_btc`, `cus
 
 `GET /health` now also returns `feeds` and is `degraded` unless the Binance and CLOB feeds are `live`.
 
+## Implemented (Phase 5): bot, signals, AI
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/paper-trading/start` · `/stop` | Start or stop the bot. 409 if no strategy is enabled or emergency stop is active |
+| GET | `/engine/status` | `{bot_running, mode, enabled[], engine{last_tick, evaluations, errors, last_error, last_training}, active_model}` |
+| GET | `/signals?strategy=&asset=&status=accepted\|rejected&resolved=&before=&limit=` | Signals, newest first: `{strategy, asset, side, status, code, reason, price, confidence, secs_in, outcome, won, pnl_per_dollar}` |
+| GET | `/strategies/{key}/signals` | Same, for one strategy |
+| GET | `/signals/stats?days=` | Per strategy: taken, settled, wins, hit rate, break-even (= avg price), P&L per $1, and skips by reason with how often they'd have won |
+| GET | `/ai/models` | The last 10 models with metrics (train/val/test, market baseline, calibration, simulated test trades, coefficients), plus data counts |
+| POST | `/ai/train` | `{kind: logreg\|gbm, days}` → `{ok, version, activated, metrics}` or `{ok: false, reason}` |
+| WS | `/ws/signals` | Auth frame first. Then a `{"type":"signal", strategy, asset, side, status, code, reason, price, confidence, secs_in, ts}` for each recorded decision |
+
 ## Planned contracts (added in the phase that makes them real)
 
 | Phase | Endpoint | Purpose |
 |---|---|---|
-| 5 | `GET /strategies/{key}/signals`, `WS /ws/signals` | Signal history and stream (accepted and rejected, with reasons) |
-| 5 | `POST /paper-trading/start`, `/stop` | Run the engines against the paper book |
 | 6 | `GET /portfolio`, `/positions`, `/orders`, `/trades?asset=&strategy=&from=&to=&result=` | Book of record |
 | 6 | `WS /ws/orders`, `/ws/positions`, `/ws/portfolio` | Lifecycle updates |
 | 7 | `POST /backtests`, `GET /backtests/{id}`, `GET /analytics` | Backtests and metrics |

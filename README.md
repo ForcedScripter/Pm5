@@ -16,8 +16,9 @@ console; see `docs/reverse_engineering.md`.
 | 2. Architecture, DB, API core, Docker | ✅ `docs/architecture.md`, `docs/api_documentation.md` |
 | 3. Frontend | ✅ Terminal, Settings (wallet, strategies, risk, live gate), Logs, Signals · `docs/screenshots/` |
 | 4. Market infrastructure | ✅ Binance + Polymarket collectors, registry, books, features, `/ws/markets` |
-| 5. Strategy engines | next |
-| 6–8. Execution → backtesting → hardening | planned |
+| 5. Strategy engines | ✅ Constellation, Custom BTC/ETH, Pocket Aces, Mean Reversion, AI Strat; signal scoring · `docs/strategies.md` |
+| 6. Execution (paper → live orders) | next |
+| 7–8. Backtesting → hardening | planned |
 
 `legacy_v0/` holds the first single-file bot. It already paper-trades end to end, and it's
 the reference for porting strategy logic in Phase 5.
