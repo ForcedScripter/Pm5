@@ -28,7 +28,8 @@ class BacktestIn(BaseModel):
     start: dt.datetime | None = None
     end: dt.datetime | None = None
     days: float | None = Field(None, gt=0, le=60)
-    fidelity: str = Field("auto", pattern="^(auto|recorded|backfill)$")
+    # recorded by default: backfilled prices are biased (see docs/backtesting.md); "backfill"/"auto" are exploratory
+    fidelity: str = Field("recorded", pattern="^(auto|recorded|backfill)$")
     bankroll: float = Field(200, gt=0)
     latency_s: float = Field(2, ge=0, le=60)
     extra_slippage: float = Field(0, ge=0, le=0.1)

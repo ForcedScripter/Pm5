@@ -20,6 +20,25 @@ Settings → Backtest → **Backfill history** downloads up to 14 days. It's ide
 after interruptions. Every result is labelled with its mix of tiers, and backfilled results carry
 a warning.
 
+## ⚠️ Finding: backfilled prices are biased (do not judge an edge on them)
+
+Measured on 126 rounds where we have **both** a recorded live book and the public price
+history, at the same second:
+- The public price differs from the live mid by **7¢ on average** (median 4.5¢). 40% of points are more than 5¢ off.
+- Where spot really moved, the public price **lagged** the live book **87% of the time** (158 of 181 cases).
+- So the backtest "bought" the spot-favoured side **~8.4¢ cheaper** than a real order would have.
+
+Effect: on the 3-day backfill, all strategies combined showed **+$3,136 at a 68.6% win rate**, but
+the same strategies on **recorded** books **lost money**. An AI model trained on the mixed data
+also "beat the market", by learning the lag. It was **deactivated**.
+
+Consequences in the code:
+- Backtests default to **recorded** data.
+- *Mixed* and *Backfill* modes are labelled biased, re-measure the bias on every run and print it.
+- AI Strat trains and validates on recorded books only (`include_backfill=False`).
+
+The trustworthy dataset grows only while the backend runs: about 72 recorded rounds per hour.
+
 ## No look-ahead
 
 - Features at time *t* use only 1s bars ≤ *t* (`ArraySource`, which is parity-tested against the live `BarBuffer`).

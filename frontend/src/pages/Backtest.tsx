@@ -34,7 +34,8 @@ function DataPanel() {
           ))}
         </div>
         <p className="text-tx-low">{c?.first_round ? `${new Date(c.first_round).toLocaleString()} → ${new Date(c.last_round!).toLocaleString()}` : ""}
-          {" "}· <b className="text-tx">Recorded</b> rounds have real 5-second books; <b className="text-tx">backfilled</b> ones have one public price per minute.</p>
+          {" "}· <b className="text-tx">Recorded</b> rounds have real 5-second books. <b className="text-tx">Backfilled</b> ones have one public price per minute that
+          lags the real market, so they overstate momentum strategies: use them to explore, not to judge an edge.</p>
         <div className="flex flex-wrap items-center gap-2">
           <div className="w-56"><Segmented value={days} onChange={setDays} options={[{ value: "1", label: "1d" }, { value: "3", label: "3d" }, { value: "7", label: "7d" }, { value: "14", label: "14d" }]} /></div>
           <Button variant="amber" size="sm" loading={start.isPending} disabled={b?.running} onClick={() => start.mutate()}>Backfill history</Button>
@@ -55,7 +56,7 @@ function RunForm({ onStarted }: { onStarted: (id: string) => void }) {
   const qc = useQueryClient();
   const [strategies, setStrategies] = useState<string[]>(["constellation", "custom_btc", "pocket_aces"]);
   const [days, setDays] = useState<number | null>(3);
-  const [fidelity, setFidelity] = useState<"auto" | "recorded" | "backfill">("auto");
+  const [fidelity, setFidelity] = useState<"auto" | "recorded" | "backfill">("recorded");
   const [bankroll, setBankroll] = useState<number | null>(200);
   const [latency, setLatency] = useState<number | null>(2);
   const [slip, setSlip] = useState<number | null>(0);
@@ -81,7 +82,7 @@ function RunForm({ onStarted }: { onStarted: (id: string) => void }) {
           <NumberField label="Extra slippage" hint="Added to every fill price on top of the book's ask/bid." step={0.005} value={slip} onChange={setSlip} />
         </div>
         <Segmented value={riskMode} onChange={setRiskMode} options={[{ value: "mine", label: "My risk limits", sub: "what the bot would do" }, { value: "edge", label: "Strategy edge", sub: "no portfolio caps" }]} />
-        <Segmented value={fidelity} onChange={setFidelity} options={[{ value: "auto", label: "Auto", sub: "best available" }, { value: "recorded", label: "Recorded", sub: "real books only" }, { value: "backfill", label: "Backfill", sub: "public prices" }]} />
+        <Segmented value={fidelity} onChange={setFidelity} options={[{ value: "recorded", label: "Recorded", sub: "real books · trustworthy" }, { value: "auto", label: "Mixed", sub: "adds backfill · biased" }, { value: "backfill", label: "Backfill", sub: "biased · exploratory" }]} />
         {run.error && <p className="text-sm text-down" role="alert">{run.error.message}</p>}
         <Button variant="gold" className="w-full" loading={run.isPending} disabled={!strategies.length} onClick={() => run.mutate()}><Play className="h-4 w-4" />Run backtest</Button>
       </div>
@@ -195,7 +196,7 @@ export default function Backtest() {
   const del = useMutation({ mutationFn: (x: string) => Api.deleteBacktest(x), onSuccess: () => { setSel(null); qc.invalidateQueries({ queryKey: ["backtests"] }); } });
   const d = detail.data;
   return (
-    <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
       <div className="space-y-5">
         <DataPanel />
         <RunForm onStarted={setSel} />
@@ -203,7 +204,7 @@ export default function Backtest() {
           {!list.data?.length ? <Empty>No backtests yet.</Empty> : (
             <ul className="divide-y divide-line">{list.data.map((b) => (
               <li key={b.id}><button onClick={() => setSel(b.id)} className={cn("w-full px-4 py-2.5 text-left text-[12px] hover:bg-surf-2/50", b.id === id && "bg-amber/10")}>
-                <div className="flex justify-between gap-2"><span className="truncate font-semibold text-tx-hi">{b.name}</span>
+                <div className="flex justify-between gap-2"><span className="min-w-0 truncate font-semibold text-tx-hi">{b.name.replaceAll("+", " + ")}</span>
                   <Badge className={b.status === "done" ? "border-up/40 text-up" : b.status === "failed" ? "border-down/50 text-down" : "border-amber/50 text-amber"}>{b.status === "running" ? pct(b.progress, 0) : b.status}</Badge></div>
                 <div className="num mt-0.5 text-tx-low">{b.trades != null ? `${b.trades} trades · ${fmtUsd(b.net_pnl, true)} · win ${pct(b.win_rate)}` : b.error ?? ""}</div>
               </button></li>))}</ul>)}
@@ -213,7 +214,7 @@ export default function Backtest() {
         {!d ? <Panel><Empty>Run a backtest to see results.</Empty></Panel> : (
           <Panel className="p-5">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div><h2 className="font-brand text-xl text-tx-hi">{d.name}</h2>
+              <div className="min-w-0"><h2 className="font-brand text-xl break-words text-tx-hi">{d.name.replaceAll("+", " + ")}</h2>
                 <p className="text-[12px] text-tx-low">{new Date(d.period[0]).toLocaleString()} → {new Date(d.period[1]).toLocaleString()} · {d.strategies.join(", ")}</p></div>
               <Button variant="ghost" size="sm" disabled={d.status === "running"} onClick={() => del.mutate(d.id)}><Trash2 className="h-3.5 w-3.5" />Delete</Button>
             </div>

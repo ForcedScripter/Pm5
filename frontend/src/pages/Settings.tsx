@@ -163,7 +163,7 @@ export default function Settings() {
   useEffect(() => { if (loc.hash) document.querySelector(loc.hash)?.scrollIntoView({ behavior: "smooth" }); }, [loc.hash]);
   const health = useQuery({ queryKey: ["health"], queryFn: Api.health, refetchInterval: 30_000 });
   return (
-    <div className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
       <div className="space-y-5">
         <WalletPanel />
         <LiveTrading />

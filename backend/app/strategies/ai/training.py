@@ -49,7 +49,10 @@ class Dataset:
 BACKFILL_HALF_SPREAD = 0.005    # modeled half spread for backfilled rounds (median live spread is ~1¢)
 
 
-async def build_dataset(db: AsyncSession, since: dt.datetime, until: dt.datetime, include_backfill: bool = True) -> Dataset:
+async def build_dataset(db: AsyncSession, since: dt.datetime, until: dt.datetime, include_backfill: bool = False) -> Dataset:
+    """include_backfill defaults to False: backfilled per-minute prices LAG spot (measured: 87% of real moves,
+    ~8¢ too cheap for the spot-favoured side), so a model trained on them learns a staleness that
+    does not exist in a live order book. Only recorded books are used to train and validate."""
     markets = (await db.execute(text("""
         select id::text, asset, extract(epoch from window_start)::bigint as ws, winner
         from markets where closed and winner is not null and window_start >= :a and window_end <= :b

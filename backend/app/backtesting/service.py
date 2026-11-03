@@ -11,6 +11,7 @@ import numpy as np
 from sqlalchemy import select
 
 from app.backtesting.engine import load, simulate
+from app.backtesting.engine import warnings as bt_warnings
 from app.database.session import sessions
 from app.models import Backtest, Strategy, StrategyConfiguration, UserSettings
 from app.strategies.ai.training import Model, build_dataset, chrono_split
@@ -51,6 +52,37 @@ async def strategy_params(db, user_id, keys: list[str], overrides: dict) -> dict
     return out
 
 
+async def backfill_bias(db) -> dict:
+    """How far the public price history lags real books, measured on rounds we have BOTH for."""
+    from sqlalchemy import text as T
+    rows = (await db.execute(T("""
+      with p as (
+        select m.asset, extract(epoch from m.window_start)::bigint ws, extract(epoch from t.ts)::bigint at, t.price hp,
+               (s.up_bid + s.up_ask) / 2 mid, s.up_ask ask
+        from token_price_history t join market_tokens mt on mt.token_id = t.token_id and mt.outcome = 'UP'
+        join markets m on m.id = mt.market_id
+        join lateral (select * from market_snapshots s where s.market_id = m.id and s.ts <= t.ts and s.up_bid is not null
+                      and s.up_ask is not null order by s.ts desc limit 1) s on true
+        where t.ts - s.ts < interval '6 seconds')
+      select p.*, (select open from price_history where asset = p.asset and ts = to_timestamp(p.ws)) o,
+                  (select close from price_history where asset = p.asset and ts = to_timestamp(p.at)) c from p"""))).all()
+    lag = opp = 0
+    cheaper = []
+    for r in rows:
+        if r.o is None or r.c is None:
+            continue
+        d = (float(r.c) - float(r.o)) / float(r.o) * 100
+        gap = float(r.mid) - float(r.hp)
+        if abs(d) < 0.03 or abs(gap) < 0.02:
+            continue
+        lag += (d > 0) == (gap > 0)
+        opp += (d > 0) != (gap > 0)
+        cheaper.append((float(r.ask) - float(r.hp)) if d > 0 else ((1 - float(r.mid)) - (1 - float(r.hp))))
+    n = lag + opp
+    return {"points": n, "lag_share": lag / n if n else None,
+            "mean_cheaper_cents": (sum(cheaper) / len(cheaper) * 100) if cheaper else None, "overlap_points": len(rows)}
+
+
 async def walk_forward_model(db, start: int, split: int, kind: str = "logreg"):
     """Fit AI Strat ONLY on rounds that ended before the out-of-sample split (plus up to 7 days of
     earlier history). The model never sees the period it is evaluated on out-of-sample."""
@@ -88,6 +120,10 @@ async def run(bt_id: uuid.UUID) -> None:
         res = await asyncio.to_thread(simulate, data, p["strategies"], params, risk, float(p.get("bankroll", 200)),
                                       float(p.get("latency_s", 2)), float(p.get("extra_slippage", 0)), predictor,
                                       lambda f: _progress(key, f))
+        if data and any(r.fidelity == "backfill" for r in data.rounds):
+            async with sessions()() as db:
+                res["backfill_bias"] = await backfill_bias(db)
+            res["warnings"] = bt_warnings(res)
         if note:
             res["warnings"].insert(0, note)
             if predictor:

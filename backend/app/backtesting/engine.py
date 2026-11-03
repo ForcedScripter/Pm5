@@ -365,18 +365,29 @@ def warnings(res: dict) -> list[str]:
     if n < 100:
         w.append(f"Only {n} trades: results are dominated by noise. The 95% win-rate interval is shown for that reason.")
     if res["rounds"].get("backfill"):
-        w.append(f"{res['rounds']['backfill']} of {res['rounds']['total']} rounds use backfilled prices (1/min, modeled spread, "
-                 "depth unknown): entries are coarser and liquidity limits are not enforced on them.")
+        bias = res.get("backfill_bias") or {}
+        msg = (f"BIASED DATA: {res['rounds']['backfill']} of {res['rounds']['total']} rounds use backfilled prices. Polymarket's "
+               "public price history lags the live book")
+        if bias.get("points"):
+            msg += (f" (measured here: it lagged spot in {bias['lag_share']:.0%} of {bias['points']} real moves and made the "
+                    f"spot-favoured side ~{bias['mean_cheaper_cents']:.1f}¢ too cheap)")
+        w.append(msg + ". Momentum strategies look profitable on it for that reason alone. Do not judge an edge "
+                 "on backfilled results; use recorded rounds.")
     oos = (res.get("split") or {}).get("out_of_sample") or {}
     ins = (res.get("split") or {}).get("in_sample") or {}
     if oos.get("trades") and ins.get("trades") and ins.get("net_pnl", 0) > 0 >= oos.get("net_pnl", 0):
         w.append("Profitable in-sample but not out-of-sample: likely overfit or regime-dependent.")
     blocks = sum(res.get("risk_blocks", {}).values())
     entries = res.get("counts", {}).get("entries", 0)
+    portfolio = {"max_daily_exposure", "max_daily_loss", "max_open_positions", "max_drawdown", "loss_cooldown"}
     if blocks > max(5, entries * 0.25):
         top = max(res["risk_blocks"], key=res["risk_blocks"].get)
-        w.append(f"Your risk limits blocked {blocks} entries (mostly {top}). Results reflect those limits, not the raw strategy "
-                 "edge. Re-run with 'Strategy edge' risk mode to compare.")
+        if top in portfolio:
+            w.append(f"Your portfolio risk limits blocked {blocks} entries (mostly {top}). Results reflect those limits, not the "
+                     "raw strategy edge. Re-run in 'Strategy edge' mode to compare.")
+        else:
+            w.append(f"Order checks blocked {blocks} entries (mostly {top}): prices moved or books were too thin/wide by the "
+                     "time the order would have gone out.")
     if (res.get("split") or {}).get("out_of_sample", {}).get("trades", 0) == 0 and res["overall"].get("trades"):
         w.append("No trades in the out-of-sample segment: nothing here has been validated on unseen data.")
     o = res["overall"]
