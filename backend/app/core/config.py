@@ -23,7 +23,12 @@ class Settings(BaseSettings):
     # First-run admin password; hashed into the users table on first boot, then ignored.
     admin_password: str = ""
 
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # comma-separated (plain string so it survives shell `source .env` and docker env_file alike)
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     # Trading safety. Live orders need BOTH this env flag AND the in-app live switch.
     allow_live_trading: bool = False
@@ -32,6 +37,11 @@ class Settings(BaseSettings):
     private_key: str = ""
     funder_address: str = ""
     signature_type: int = 1
+
+    # Market-data pipeline (Binance + Polymarket collectors). Off in tests.
+    market_data_enabled: bool = True
+    price_history_retention_days: int = 30
+    snapshot_retention_days: int = 90
 
     # External endpoints
     clob_host: str = "https://clob.polymarket.com"

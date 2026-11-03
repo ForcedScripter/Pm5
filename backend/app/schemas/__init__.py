@@ -116,4 +116,5 @@ class HealthOut(BaseModel):
     redis: bool
     config_problems: list[str]
     server_time: float
+    feeds: dict = {}
     user_id: uuid.UUID | None = None

@@ -1,4 +1,4 @@
-# Architecture (Phase 2)
+# Architecture (updated Phase 4)
 
 ## Services
 
@@ -15,14 +15,45 @@
 | Service | Status | Notes |
 |---|---|---|
 | `postgres` | ✅ | Source of truth for configs, signals, orders, fills, positions and trades |
-| `redis` | ✅ | Live snapshots, event streams, locks (Phase 4+) |
+| `redis` | ✅ | Market-data leader lock, live spot/book snapshots, 1s bar streams |
 | `backend` | ✅ API core | Auth, wallet, strategy configs, settings, live gate, emergency stop, health |
-| market-data / discovery | Phase 4 | Runs inside the backend process as asyncio tasks; can be split into its own container later |
+| market-data / discovery | ✅ Phase 4 | asyncio tasks inside the backend, see "Market data pipeline" below |
 | strategy engines | Phase 5 | constellation, ai_strat, mean_reversion, custom_btc/eth, pocket_aces |
 | risk + execution | Phase 6 | One shared risk engine; paper and live executors |
-| frontend | Phase 3 | React 19, Vite, Tailwind, shadcn/ui |
+| frontend | ✅ Phase 3 | React 19, Vite, Tailwind, shadcn/ui; since Phase 4 it talks only to the backend |
 
-## Event pipeline (Phases 4–6)
+## Market data pipeline (Phase 4)
+
+```
+Binance WS (kline_1s, bookTicker, miniTicker × 6) ─▶ BinanceCollector ─▶ BarBuffer (memory, 65 min)
+     ▲ REST klines backfill on boot + after every reconnect gap         ├─▶ price_history (PG, batched 500/chunk)
+                                                                         └─▶ Redis: pm5:md:{asset} stream, pm5:spot:{asset}
+Gamma /events?slug={asset}-updown-5m-{start} ─▶ Registry (every 2s)
+     current + next window for 6 assets → markets / market_tokens (PG); records ref open price;
+     polls ended windows until Polymarket settles → markets.closed / winner / resolved_at
+CLOB WS market channel (12 tokens) ─▶ BookService: snapshot + price_change deltas → OrderBook
+     resubscribes on rollover; reloads a book from REST if it ever crosses;
+     every 5s → market_snapshots (PG) + Redis pm5:book:{token}
+Hub ─▶ 1 Hz `markets` frame (spot, features, book summaries, feed health) ─▶ /ws/markets ─▶ browser
+```
+
+**Features** (`market_data/bars.py`, pure): returns over 1/5/10/15/30/60s, the round move since
+window open, 60s realised volatility, and 1h return. They're computed only from bars at or before
+`now`, so the same code replays in backtests with no look-ahead.
+
+**Reliability** (each item has a test in `tests/test_phase4_failures.py` or `tests/live/`):
+- Reconnects use exponential backoff (1s up to 30s). After a Binance reconnect, the gap is backfilled from REST.
+- A feed silent for 15s (Binance) or 30s (CLOB) is treated as dead and reconnected. Health reports `live` / `stale` / `down` per feed.
+- Polymarket disconnects slow readers with **1013 "slow consumer"**. So the WS clients use large receive queues, the book hot path is about 5µs per message, crossed-book checks are batched once per second, and blocking work runs in threads: bcrypt logins and the SDK's synchronous HTTP. The bar writer yields every 500 rows. A loop-lag monitor logs any stall over 250ms.
+- If the database is down, bars stay queued and nothing is lost; memory is capped at 50k bars.
+- Leader election: `SET pm5:md:leader NX EX 15`, renewed every 5s. Standby nodes keep retrying, so a restart or a crashed leader is taken over automatically.
+- Validated live: across 28 consecutive server snapshots, the delta-maintained books matched exactly (`tests/live`, `RUN_LIVE=1`).
+- Retention: 1s bars are kept 30 days and book snapshots 90 days (configurable).
+
+**Known limitation:** Polymarket settles on Chainlink's 60s TWAP, while our signal reference
+is Binance's 1s open. They usually agree, but they can disagree on very small moves.
+
+## Event pipeline (Phases 5–6)
 
 ```
 Binance WS ─▶ collector ─▶ XADD md:{asset}        (Redis Stream, 1s bars + ticks)

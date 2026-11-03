@@ -2,6 +2,7 @@
 encrypted immediately and only ever decrypted in-process to build a signer."""
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import logging
@@ -61,7 +62,8 @@ async def save_wallet(db: AsyncSession, user_id: uuid.UUID, private_key: str, fu
     if sig_type == 0:
         funder = None
     try:
-        creds = verify(private_key, funder, sig_type) if verify else None
+        # sync HTTP inside the SDK: run in a thread so the market feeds keep flowing
+        creds = await asyncio.to_thread(verify, private_key, funder, sig_type) if verify else None
     except Exception as e:  # noqa: BLE001
         raise WalletError(f"Polymarket rejected these credentials: {type(e).__name__}") from e
 

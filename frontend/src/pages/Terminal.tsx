@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNow } from "@/components/layout/Shell";
 import { Badge, Empty, Panel, PanelHeader, Stat } from "@/components/ui/panel";
-import { useBooks, useWindowMarkets, type Book } from "@/hooks/usePolymarket";
+import { useOrderbook, type Book } from "@/hooks/useOrderbook";
 import { ASSETS, ASSET_META, cn, fmtCents, fmtPct, fmtPrice, fmtUsd, mmss, tone, windowStart, type Asset } from "@/lib/utils";
 import { CandleChart } from "@/markets/CandleChart";
 import { Sparkline } from "@/markets/Sparkline";
@@ -126,16 +126,15 @@ function BookSide({ label, book, color }: { label: string; book: Book | undefine
 }
 
 function OrderBook({ asset }: { asset: Asset }) {
-  const markets = useWindowMarkets();
-  const books = useBooks(markets.data);
-  const m = markets.data?.[asset];
+  const m = useMarket((s) => s.spot[asset].market);
+  const books = useOrderbook(m?.id);
   return (
     <Panel>
       <PanelHeader icon={<BookOpen />} title="Order book" right={<span className="font-num text-xs font-bold text-tx-mid">{ASSET_META[asset].sym}</span>} />
-      {!m ? <Empty>{markets.isLoading ? "Finding this round's market…" : "No active 5-minute market found for this round."}</Empty> : (
+      {!m ? <Empty>{useMarket.getState().status === "live" ? "No active 5-minute market found for this round yet." : "Waiting for the market feed…"}</Empty> : (
         <div className="py-3">
-          <div className="flex gap-2"><BookSide label="UP" book={books.data?.[m.upToken]} color="#35d49a" />
-            <BookSide label="DOWN" book={books.data?.[m.downToken]} color="#ff5a76" /></div>
+          <div className="flex gap-2"><BookSide label="UP" book={books.data?.up} color="#35d49a" />
+            <BookSide label="DOWN" book={books.data?.down} color="#ff5a76" /></div>
           <a href={`https://polymarket.com/event/${m.slug}`} target="_blank" rel="noreferrer" className="mt-2 block truncate px-3 text-[10.5px] text-tx-dim hover:text-tx">{m.question} ↗</a>
         </div>
       )}

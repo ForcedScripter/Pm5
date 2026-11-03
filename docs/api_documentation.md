@@ -30,12 +30,24 @@ endpoints except `health`, `time` and `auth/login` require it. Errors look like
 Strategy keys: `constellation`, `ai_strat`, `mean_reversion`, `custom_btc`, `custom_eth`,
 `pocket_aces`. Each one's parameter schema is in `backend/app/strategies/catalog.py`.
 
+## Implemented (Phase 4): markets and streams
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/markets/active` | Current window for each asset: ids, tokens, times, `up`/`down` book summary `{bid, ask, spread, ask_depth, bid_depth, last_trade, age_s, synced}`. 503 if this node isn't the market-data leader |
+| GET | `/markets/history?asset=&limit=` | Recent windows with `closed`, `winner`, `ref_open_price` |
+| GET | `/markets/candles/{asset}?interval=1\|5\|15\|60\|300&limit=` | OHLCV built from stored 1s bars |
+| GET | `/markets/{id}` | Market row, token ids, snapshot count |
+| GET | `/markets/{id}/orderbook?depth=` | Live depth for both outcomes (current window only; 409 otherwise) |
+| WS | `/ws/markets` | Auth frame first. Then `{"type":"markets", ts, window{start,end,secs_in}, assets{asset:{price,bid,ask,change_24h,bar[ts,o,h,l,c],features{…},market{…}}}, feeds{…}, loop_lag_ms}` at 1 Hz, plus a `heartbeat` when idle |
+| WS | `/ws/system-status` | Auth frame first. Then `{"type":"status", leader, feeds, clients}` every 5s |
+
+`GET /health` now also returns `feeds` and is `degraded` unless the Binance and CLOB feeds are `live`.
+
 ## Planned contracts (added in the phase that makes them real)
 
 | Phase | Endpoint | Purpose |
 |---|---|---|
-| 4 | `GET /markets/active`, `GET /markets/{id}`, `GET /markets/{id}/orderbook` | Market registry and books |
-| 4 | `WS /ws/markets`, `WS /ws/system-status` | Live prices and books; feed health and heartbeats |
 | 5 | `GET /strategies/{key}/signals`, `WS /ws/signals` | Signal history and stream (accepted and rejected, with reasons) |
 | 5 | `POST /paper-trading/start`, `/stop` | Run the engines against the paper book |
 | 6 | `GET /portfolio`, `/positions`, `/orders`, `/trades?asset=&strategy=&from=&to=&result=` | Book of record |

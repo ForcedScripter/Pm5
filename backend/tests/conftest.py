@@ -10,6 +10,7 @@ os.environ.update({
     "ADMIN_PASSWORD": "correct horse battery staple",
     "ALLOW_LIVE_TRADING": "true",
     "PRIVATE_KEY": "",
+    "MARKET_DATA_ENABLED": "false",
 })
 
 import httpx  # noqa: E402

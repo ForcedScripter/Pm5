@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import { Crosshair, Radar } from "lucide-react";
 import { useNow } from "@/components/layout/Shell";
 import { Badge, Empty, Panel, PanelHeader } from "@/components/ui/panel";
-import { useBooks, useWindowMarkets } from "@/hooks/usePolymarket";
 import { ASSETS, ASSET_META, cn, fmtCents, fmtPct, fmtPrice, mmss, tone, windowStart, type Asset } from "@/lib/utils";
 import { Api } from "@/services/api";
 import { useMarket, windowDelta } from "@/stores/market";
@@ -14,8 +13,6 @@ import { DEFAULT_CFG, evaluate, type ConsensusCfg } from "@/strategies/consensus
 export default function Signals() {
   const now = useNow(1000);
   const spot = useMarket((s) => s.spot);
-  const markets = useWindowMarkets();
-  const books = useBooks(markets.data);
   const strat = useQuery({ queryKey: ["strategies"], queryFn: Api.strategies });
   const p = strat.data?.find((s) => s.key === "constellation")?.params as Record<string, any> | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
   const cfg: ConsensusCfg = p ? {
@@ -26,8 +23,8 @@ export default function Signals() {
   const secsIn = now / 1000 - windowStart();
   const deltas = Object.fromEntries(ASSETS.map((a) => [a, windowDelta(spot[a])])) as Record<Asset, number | null>;
   const prices = Object.fromEntries(ASSETS.map((a) => {
-    const m = markets.data?.[a];
-    return [a, { up: m ? books.data?.[m.upToken]?.bestAsk ?? null : null, down: m ? books.data?.[m.downToken]?.bestAsk ?? null : null }];
+    const m = spot[a].market;
+    return [a, { up: m?.up?.ask ?? null, down: m?.down?.ask ?? null }];
   })) as Record<Asset, { up: number | null; down: number | null }>;
   const r = evaluate(deltas, prices, secsIn, cfg);
   const lead = r.up.count >= r.down.count ? r.up : r.down;

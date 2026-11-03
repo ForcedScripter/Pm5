@@ -15,8 +15,9 @@ console; see `docs/reverse_engineering.md`.
 | 1. Reference investigation | ✅ `docs/reverse_engineering.md` |
 | 2. Architecture, DB, API core, Docker | ✅ `docs/architecture.md`, `docs/api_documentation.md` |
 | 3. Frontend | ✅ Terminal, Settings (wallet, strategies, risk, live gate), Logs, Signals · `docs/screenshots/` |
-| 4. Market infrastructure | next |
-| 5–8. Strategies → execution → backtesting → hardening | planned |
+| 4. Market infrastructure | ✅ Binance + Polymarket collectors, registry, books, features, `/ws/markets` |
+| 5. Strategy engines | next |
+| 6–8. Execution → backtesting → hardening | planned |
 
 `legacy_v0/` holds the first single-file bot. It already paper-trades end to end, and it's
 the reference for porting strategy logic in Phase 5.
@@ -35,6 +36,7 @@ entered there.
 
 Frontend dev: `cd frontend && npm install && npm run dev` (proxies `/api` to `:8000`).
 Tests: `npx vitest run` (unit) and `ADMIN_PASSWORD=… node e2e/smoke.cjs` (end-to-end).
+Live feed checks (hit real Binance and Polymarket): `cd backend && RUN_LIVE=1 ../.venv/bin/python -m pytest tests/live`.
 
 ## Develop and test
 

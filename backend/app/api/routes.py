@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import time
 
@@ -25,7 +26,9 @@ router = APIRouter(prefix="/api")
 @router.post("/auth/login", response_model=TokenOut, dependencies=[Depends(login_limit)])
 async def login(body: LoginIn, db: AsyncSession = Depends(get_db)):
     user = (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
-    if not user or not user.is_active or not verify_password(body.password, user.password_hash):
+    # bcrypt is deliberately slow (~250 ms CPU): run it off the event loop so logins don't stall the feeds
+    ok = bool(user) and user.is_active and await asyncio.to_thread(verify_password, body.password, user.password_hash)
+    if not ok:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "wrong username or password")
     return TokenOut(token=make_token(str(user.id)), username=user.username)
 

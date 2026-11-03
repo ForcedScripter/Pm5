@@ -12,3 +12,4 @@ PyJWT==2.15.1
 bcrypt==5.0.0
 py-clob-client-v2==1.2.1
 python-dotenv==1.2.4
+websockets==17.4

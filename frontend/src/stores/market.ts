@@ -1,116 +1,145 @@
 import { create } from "zustand";
-import { ASSETS, ASSET_META, WINDOW_S, windowStart, type Asset } from "@/lib/utils";
+import { ASSETS, type Asset } from "@/lib/utils";
+import { useAuth } from "@/stores/auth";
 
-/** Live spot data, straight from Binance's public market-data endpoints (real data only).
- *  Phase 4 replaces the direct browser feed with the backend's /ws/markets stream. */
-const REST = "https://data-api.binance.vision/api/v3";
-const WS = "wss://data-stream.binance.vision/stream";
+/** Live market state, streamed from OUR backend (`/ws/markets`, 1 frame per second).
+ *  The backend owns the Binance and Polymarket connections; the browser talks only to it. */
 
 export interface Candle { time: number; open: number; high: number; low: number; close: number }
+export interface BookSummary { bid: number | null; ask: number | null; spread: number | null; ask_depth: number; bid_depth: number;
+  last_trade: number | null; age_s: number | null; synced: boolean }
+export interface MarketRef { id: string; slug: string; question: string; start: number; end: number; up: BookSummary | null; down: BookSummary | null }
+export interface Features { ts: number; price: number | null; window_open: number | null; window_delta: number | null; secs_in: number;
+  vol_60s: number | null; ret_1h: number | null; [k: `ret_${number}s`]: number | null }
 
 export interface SpotState {
   price: number | null;
-  change24h: number | null;     // %
-  change1h: number | null;      // %
-  windowOpen: number | null;    // 1m open at current 5-minute window start
-  windowStartTs: number | null;
-  candles: Candle[];            // last ~120 x 1m
+  change24h: number | null;
+  change1h: number | null;
+  windowOpen: number | null;
+  windowDelta: number | null;
+  features: Features | null;
+  market: MarketRef | null;
+  candles: Candle[];         // 1-minute candles: history from REST, live-updated from 1s bars
 }
+
+export interface FeedStatus { name: string; status: "live" | "stale" | "down" | "connecting"; last_msg_age_s: number | null; reconnects: number; last_error: string | null }
 
 interface MarketStore {
   spot: Record<Asset, SpotState>;
   status: "connecting" | "live" | "stale" | "down";
-  lastTick: number;             // ms
+  lastTick: number;
+  serverOffset: number;      // serverTime - clientTime (s), for countdowns
+  window: { start: number; end: number } | null;
+  feeds: Record<string, FeedStatus>;
   start: () => void;
+  loadCandles: (a: Asset) => Promise<void>;
 }
 
-const blank = (): SpotState => ({ price: null, change24h: null, change1h: null, windowOpen: null, windowStartTs: null, candles: [] });
+const blank = (): SpotState => ({ price: null, change24h: null, change1h: null, windowOpen: null, windowDelta: null, features: null, market: null, candles: [] });
 
 let ws: WebSocket | null = null;
 let started = false;
 let retry = 0;
 
+type Set = (p: Partial<MarketStore> | ((s: MarketStore) => Partial<MarketStore>)) => void;
+
 export const useMarket = create<MarketStore>((set, get) => ({
   spot: Object.fromEntries(ASSETS.map((a) => [a, blank()])) as Record<Asset, SpotState>,
   status: "connecting",
   lastTick: 0,
+  serverOffset: 0,
+  window: null,
+  feeds: {},
   start: () => {
     if (started) return;
     started = true;
-    void loadHistory(set, get);
-    connect(set, get);
-    // window rollover + staleness watchdog
-    let lastWindow = windowStart();
+    connect(set);
+    ASSETS.forEach((a) => void get().loadCandles(a));
+    let tick = 0;
     setInterval(() => {
-      const w = windowStart();
-      if (w !== lastWindow) { lastWindow = w; void loadHistory(set, get); }
+      // history may be empty right after a backend restart: retry until it arrives
+      if (++tick % 5 === 0) ASSETS.forEach((a) => { if (get().spot[a].candles.length < 10) void get().loadCandles(a); });
       const age = Date.now() - get().lastTick;
-      if (get().status === "live" && age > 15_000) set({ status: "stale" });
-      if (get().status === "stale" && age > 30_000) { ws?.close(); }
+      if (get().status === "live" && age > 5_000) set({ status: "stale" });
+      if (get().status === "stale" && age > 20_000) ws?.close();   // force a reconnect
     }, 1000);
+  },
+  loadCandles: async (a) => {
+    try {
+      const token = useAuth.getState().token;
+      const r = await fetch(`/api/markets/candles/${a}?interval=60&limit=120`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return;
+      const candles: Candle[] = await r.json();
+      set((s) => ({ spot: { ...s.spot, [a]: { ...s.spot[a], candles: mergeCandles(candles, s.spot[a].candles) } } }));
+    } catch { /* stream status shows connectivity problems */ }
   },
 }));
 
-type Set = (p: Partial<MarketStore> | ((s: MarketStore) => Partial<MarketStore>)) => void;
-type Get = () => MarketStore;
-
-async function loadHistory(set: Set, _get: Get) {
-  const ws0 = windowStart();
-  await Promise.all(ASSETS.map(async (a) => {
-    try {
-      const r = await fetch(`${REST}/klines?symbol=${ASSET_META[a].binance}&interval=1m&limit=120`);
-      const k: (string | number)[][] = await r.json();
-      const candles: Candle[] = k.map((x) => ({ time: Number(x[0]) / 1000, open: +x[1], high: +x[2], low: +x[3], close: +x[4] }));
-      const last = candles.at(-1)?.close ?? null;
-      const hourAgo = candles.at(-61)?.open ?? null;
-      const wo = candles.find((c) => c.time === ws0)?.open ?? null;
-      set((s) => ({ spot: { ...s.spot, [a]: { ...s.spot[a], candles, price: s.spot[a].price ?? last,
-        change1h: last && hourAgo ? ((last - hourAgo) / hourAgo) * 100 : null, windowOpen: wo, windowStartTs: ws0 } } }));
-    } catch { /* surfaced through status if the WS is also down */ }
-  }));
+/** History first, then any live candles newer than it. */
+function mergeCandles(history: Candle[], live: Candle[]): Candle[] {
+  const last = history.at(-1)?.time ?? 0;
+  return [...history, ...live.filter((c) => c.time > last)].slice(-180);
 }
 
-function connect(set: Set, get: Get) {
-  const streams = ASSETS.flatMap((a) => { const s = ASSET_META[a].binance.toLowerCase(); return [`${s}@miniTicker`, `${s}@kline_1m`]; });
-  ws = new WebSocket(`${WS}?streams=${streams.join("/")}`);
+/** Fold a closed 1s bar into the 1-minute candle series. */
+export function foldBar(candles: Candle[], bar: [number, number, number, number, number]): Candle[] {
+  const [ts, o, h, l, c] = bar;
+  const t = Math.floor(ts / 60) * 60;
+  const last = candles.at(-1);
+  if (last && last.time === t) {
+    return [...candles.slice(0, -1), { time: t, open: last.open, high: Math.max(last.high, h), low: Math.min(last.low, l), close: c }];
+  }
+  if (last && t < last.time) return candles;
+  return [...candles, { time: t, open: o, high: h, low: l, close: c }].slice(-180);
+}
+
+interface Frame {
+  type: "markets"; ts: number; window: { start: number; end: number; secs_in: number };
+  assets: Record<Asset, { price: number | null; change_24h: number | null; bar: [number, number, number, number, number] | null;
+    features: Features; market: MarketRef | null }>;
+  feeds: Record<string, FeedStatus>;
+}
+
+function connect(set: Set) {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws/markets`);
   set({ status: "connecting" });
-  ws.onopen = () => { retry = 0; };
+  ws.onopen = () => ws?.send(JSON.stringify({ type: "auth", token: useAuth.getState().token }));
   ws.onmessage = (ev) => {
-    const { stream, data } = JSON.parse(ev.data);
-    const a = ASSETS.find((x) => stream.startsWith(ASSET_META[x].binance.toLowerCase()));
-    if (!a) return;
-    const now = Date.now();
-    if (stream.endsWith("@miniTicker")) {
-      const price = +data.c, open24 = +data.o;
-      set((s) => ({ status: "live", lastTick: now, spot: { ...s.spot, [a]: { ...s.spot[a], price, change24h: ((price - open24) / open24) * 100 } } }));
-    } else {
-      const k = data.k;
-      const c: Candle = { time: k.t / 1000, open: +k.o, high: +k.h, low: +k.l, close: +k.c };
-      set((s) => {
-        const cur = s.spot[a];
-        const candles = cur.candles.length && cur.candles.at(-1)!.time === c.time ? [...cur.candles.slice(0, -1), c]
-          : [...cur.candles, c].slice(-180);
-        const ws0 = windowStart();
-        const windowOpen = c.time === ws0 ? c.open : cur.windowStartTs === ws0 ? cur.windowOpen : null;
-        const hourAgo = candles.at(-61)?.open;
-        return { status: "live", lastTick: now, spot: { ...s.spot, [a]: { ...cur, candles, price: c.close, windowOpen,
-          windowStartTs: ws0, change1h: hourAgo ? ((c.close - hourAgo) / hourAgo) * 100 : cur.change1h } } };
-      });
-    }
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "ready") { retry = 0; set({ serverOffset: msg.server_time - Date.now() / 1000 }); return; }
+    if (msg.type === "error") { set({ status: "down" }); return; }
+    if (msg.type === "heartbeat") { set({ lastTick: Date.now() }); return; }
+    if (msg.type !== "markets") return;
+    const f = msg as Frame;
+    set((s) => {
+      const spot = { ...s.spot };
+      for (const a of ASSETS) {
+        const x = f.assets[a];
+        if (!x) continue;
+        const cur = spot[a];
+        spot[a] = {
+          ...cur, price: x.price, change24h: x.change_24h, change1h: x.features?.ret_1h ?? null,
+          windowOpen: x.features?.window_open ?? null, windowDelta: x.features?.window_delta ?? null,
+          features: x.features ?? null, market: x.market,
+          candles: x.bar ? foldBar(cur.candles, x.bar) : cur.candles,
+        };
+      }
+      const binance = f.feeds?.binance?.status;
+      return { spot, window: f.window, feeds: f.feeds, lastTick: Date.now(),
+               status: binance === "live" ? "live" : binance === "stale" ? "stale" : "down" };
+    });
   };
-  ws.onclose = () => {
-    set({ status: get().lastTick ? "stale" : "down" });
+  ws.onclose = (ev) => {
+    set({ status: "down" });
+    if (ev.code === 4401) { useAuth.getState().logout(); return; }
     const wait = Math.min(30_000, 1000 * 2 ** retry++);
-    setTimeout(() => connect(set, get), wait);
+    setTimeout(() => connect(set), wait);
   };
   ws.onerror = () => ws?.close();
 }
 
-/** % move of spot since the current 5-minute window opened (the signal input the strategies use). */
 export function windowDelta(s: SpotState): number | null {
-  if (s.price == null || s.windowOpen == null) return null;
-  return ((s.price - s.windowOpen) / s.windowOpen) * 100;
+  return s.windowDelta;
 }
-
-export const secondsIntoWindow = () => Date.now() / 1000 - windowStart();
-export const secondsLeft = () => WINDOW_S - secondsIntoWindow();

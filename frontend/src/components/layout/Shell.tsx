@@ -44,12 +44,13 @@ function Ticker() {
 }
 
 function FeedStatus() {
-  const { status, lastTick } = useMarket();
+  const { status, lastTick, feeds } = useMarket();
   const now = useNow();
   const age = lastTick ? Math.round((now - lastTick) / 1000) : null;
   const ok = status === "live";
+  const title = Object.values(feeds).map((f) => `${f.name}: ${f.status}${f.last_error ? ` (${f.last_error})` : ""}`).join("\n") || "backend market stream";
   return (
-    <span className="hidden items-center gap-2 rounded-full border border-line-mid bg-bg-0/60 px-3 py-1.5 text-[11px] lg:flex" title="Binance market feed">
+    <span className="hidden items-center gap-2 rounded-full border border-line-mid bg-bg-0/60 px-3 py-1.5 text-[11px] lg:flex" title={title}>
       <Heart className={cn("h-3.5 w-3.5", ok ? "fill-up text-up" : status === "stale" ? "fill-warn text-warn" : "text-down")} />
       <span className="text-tx">Market feed</span>
       <span className={cn("font-semibold", ok ? "text-amber" : "text-down")}>
@@ -133,11 +134,11 @@ function Header() {
 }
 
 function Footer() {
-  const { status } = useMarket();
+  const { status, feeds } = useMarket();
   return (
     <footer className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-line bg-bg-0/50 px-4 py-2.5 text-[11px] text-tx-low lg:px-6">
       <span className="flex items-center gap-2"><Heart className={cn("h-3 w-3", status === "live" ? "fill-up text-up" : "text-down")} />
-        Prices from Binance · markets & books from Polymarket</span>
+        Backend stream · Binance {feeds.binance?.status ?? "—"} · Polymarket books {feeds.clob?.status ?? "—"} · discovery {feeds.registry?.status ?? "—"}</span>
       <span className="font-num font-semibold tracking-wider text-tx-mid">EXPERIMENTAL · NOT FINANCIAL ADVICE</span>
     </footer>
   );

@@ -114,9 +114,9 @@ also says "Agreement scan at T+90s" and "Analyze (T+90–150s)".
 
 | Reference feature | Observed behaviour | Reconstructed implementation | Status | Unknown / unavailable |
 |---|---|---|---|---|
-| Market discovery (6 assets) | Slugs `{asset}-updown-5m-{start}` | Gamma lookup by computed slug, plus a registry with rollover | ✅ verified live (pm5bot v0) | – |
-| Live spot feed | Binance WS / CoinGecko | Binance combined WS via the `data-stream.binance.vision` mirror, with REST fallback | ⏳ Phase 4 | – |
-| Order books | Right-panel order book | CLOB `/book` + market WS channel | REST ✅ / WS ⏳ | – |
+| Market discovery (6 assets) | Slugs `{asset}-updown-5m-{start}` | Backend registry: current + next window, rollover, resolution tracking, stored in PG | ✅ Phase 4 (live-verified) | – |
+| Live spot feed | Binance WS / CoinGecko | Backend Binance collector (1s bars, book ticker, 24h) with REST backfill; stored in PG | ✅ Phase 4 | – |
+| Order books | Right-panel order book | Backend CLOB WS books (snapshot + deltas, live-verified), sampled to PG every 5s | ✅ Phase 4 | – |
 | Constellation | §3.2 | Same gates and parameters | ⏳ Phase 5 | Confidence formula, "boost" |
 | AI Strat | Weekly-retrained calibration model | Our own logistic regression + gradient boosting, trained only on our logged signals (chronological splits) | ⏳ Phase 5 | Their model and data (private) |
 | BTC & ETH rules (Simple/Advanced) | Momentum vs thresholds, band, hours, streak | Same | ✅ v0 | – |
