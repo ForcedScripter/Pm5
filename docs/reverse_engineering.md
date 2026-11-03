@@ -128,7 +128,7 @@ also says "Agreement scan at T+90s" and "Analyze (T+90–150s)".
 | Logs (All/Trades/Skips/Errors) | Activity log | Structured lifecycle log, including skips and reasons | partial v0 | – |
 | Signal Desk | Public live and history JSON | `/signals` page from our own engine | ⏳ | – |
 | Settled P&L | Data API closed positions | Reconcile against the Data API `/positions` and `/closed-positions` | ⏳ Phase 6 | – |
-| Wallet link | **Private key POSTed to their server** | **Not reproduced.** Keys never leave the user's machine (see the decision in the README) | 🚫 by design | – |
+| Wallet link | **Private key POSTed to *their* server** | Same in-website flow (key + Polymarket address), but it POSTs only to **your own** backend, which encrypts it at rest (Fernet/MASTER_KEY) and never returns or logs it. See architecture.md | ✅ Phase 2 | – |
 | AI onboarding / Ask AI | Free text → config | Optional; needs an LLM API key | ⏳ optional | Their prompt |
 | Platform fees / platform stats | Marketing | Not applicable (self-hosted) | 🚫 | – |
 | Visual design | §2 tokens and layout | Same layout, structure and color system under our own name and logo | ⏳ Phase 3 | Their logo and brand assets (not copied) |

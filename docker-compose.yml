@@ -1,0 +1,42 @@
+name: pm5bot
+
+services:
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:16-alpine
+    environment:
+      POSTGRES_DB: pm5
+      POSTGRES_USER: pm5
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pm5 -d pm5"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: public.ecr.aws/docker/library/redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: { context: ., dockerfile: infrastructure/docker/backend.Dockerfile }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pm5:${POSTGRES_PASSWORD}@postgres:5432/pm5
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    # bound to localhost only: reach it via SSH tunnel or a TLS reverse proxy, never expose raw
+    ports: ["127.0.0.1:8000:8000"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
