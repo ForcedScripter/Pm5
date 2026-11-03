@@ -131,3 +131,27 @@ export interface TradeRow {
   entry_avg: number; exit_price: number; shares: number; cost: number; proceeds: number; fees: number; pnl: number;
   opened_at: string; closed_at: string; duration_s: number;
 }
+
+export interface Metrics {
+  trades: number; wins?: number; losses?: number; win_rate?: number; win_rate_ci95?: [number, number] | null;
+  breakeven_win_rate?: number | null; net_pnl?: number; gross_profit?: number; gross_loss?: number; profit_factor?: number | null;
+  avg_win?: number | null; avg_loss?: number | null; expectancy?: number; roi_on_deployed?: number | null; total_return?: number | null;
+  max_drawdown?: number; max_drawdown_pct?: number; sharpe_per_trade?: number | null; sharpe_daily_annualized?: number | null;
+  trades_per_day?: number; span_days?: number; fees?: number; deployed?: number; equity_curve?: { t: number; equity: number }[]; note?: string;
+}
+export interface BtTrade { pnl: number; cost: number; fees: number; opened_at: number; closed_at: number; strategy: string; asset: string;
+  side: string; result: string; entry_price: number; avg_price: number | null; shares: number; fidelity: string; dca_stages: number }
+export interface BacktestResults {
+  overall: Metrics; by_strategy: Record<string, Metrics>; by_asset: Record<string, Metrics>; by_fidelity: Record<string, Metrics>;
+  split: { split_at: number; in_sample: Metrics; out_of_sample: Metrics } | null; counts: Record<string, number>;
+  skips: Record<string, number>; risk_blocks: Record<string, number>; rounds: { total: number; recorded?: number; backfill?: number; windows: number };
+  half_spread_model: number; trades: BtTrade[]; warnings: string[];
+}
+export interface BacktestSummary { id: string; name: string; status: "queued" | "running" | "done" | "failed"; created_at: string | null;
+  finished_at: string | null; error: string | null; progress: number; period: [string, string]; strategies: string[];
+  trades: number | null; net_pnl: number | null; win_rate: number | null; profit_factor: number | null }
+export interface BacktestDetail extends BacktestSummary { params: Record<string, unknown>; results: BacktestResults | null }
+export interface Coverage { settled_rounds: number; recorded_rounds: number; backfilled_rounds: number; first_round: string | null;
+  last_round: string | null; spot_bars: { from: string | null; to: string | null; count: number } }
+export interface BackfillProgress { running?: boolean; stage?: string; done?: number; total?: number; counts?: Record<string, number>;
+  error?: string | null; seconds?: number; bars_added?: number }

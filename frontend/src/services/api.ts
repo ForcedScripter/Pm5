@@ -1,5 +1,5 @@
 import { useAuth } from "@/stores/auth";
-import type { AiModels, EngineStatus, HealthOut, LogEntry, OrderRow, Portfolio, PositionRow, Readiness, SettingsOut, SignalRow, Strategy, StrategyStats, TradeRow, TrainResult, WalletOut } from "@/types/api";
+import type { BackfillProgress, BacktestDetail, BacktestSummary, Coverage, AiModels, EngineStatus, HealthOut, LogEntry, OrderRow, Portfolio, PositionRow, Readiness, SettingsOut, SignalRow, Strategy, StrategyStats, TradeRow, TrainResult, WalletOut } from "@/types/api";
 
 export class ApiError extends Error {
   status: number;
@@ -75,6 +75,13 @@ export const Api = {
     const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v).map(([k, v]) => [k, String(v)]));
     return api<TradeRow[]>(`/api/trades?${p}`);
   },
+  backtests: () => api<BacktestSummary[]>("/api/backtests"),
+  backtest: (id: string) => api<BacktestDetail>(`/api/backtests/${id}`),
+  runBacktest: (b: Record<string, unknown>) => api<BacktestSummary>("/api/backtests", { method: "POST", json: b }),
+  deleteBacktest: (id: string) => api<{ ok: boolean }>(`/api/backtests/${id}`, { method: "DELETE" }),
+  coverage: () => api<Coverage>("/api/data/coverage"),
+  backfill: () => api<BackfillProgress>("/api/backfill"),
+  startBackfill: (days: number) => api<BackfillProgress>("/api/backfill", { method: "POST", json: { days } }),
   logs: (category: string, before?: number) =>
     api<LogEntry[]>(`/api/logs?category=${category}${before ? `&before_id=${before}` : ""}`),
 };

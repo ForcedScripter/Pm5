@@ -358,6 +358,30 @@ class RiskEvent(Base):
     __table_args__ = (Index("ix_risk_user_ts", "user_id", "ts"),)
 
 
+class TokenPriceHistory(Base):
+    """Backfilled Polymarket token prices (CLOB /prices-history, ~1 point per minute). Lower
+    fidelity than live book snapshots: a single price, no bid/ask/depth."""
+    __tablename__ = "token_price_history"
+    token_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    price: Mapped[Decimal] = mapped_column(PRICE)
+
+
+class Backtest(TimestampMixin, Base):
+    __tablename__ = "backtests"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(20), default="queued")      # queued | running | done | failed
+    progress: Mapped[float] = mapped_column(Numeric(5, 4), default=0)
+    params: Mapped[dict] = mapped_column(JSONB)
+    period_from: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    period_to: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    results: Mapped[dict | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class MlModel(Base):
     """Trained AI Strat models. `artifact` holds the fitted model (JSON coefficients for logreg,
     base64 pickle for GBM); `metrics` holds train/val/test scores and calibration bins."""

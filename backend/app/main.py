@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.api.backtests import router as backtests_router
 from app.api.engine import router as engine_router, ws_router as engine_ws
 from app.api.markets import router as markets_router, ws_router
 from app.api.portfolio import router as portfolio_router, ws_router as portfolio_ws
@@ -53,6 +54,7 @@ app.include_router(engine_router)
 app.include_router(engine_ws)
 app.include_router(portfolio_router)
 app.include_router(portfolio_ws)
+app.include_router(backtests_router)
 
 
 @app.exception_handler(RequestValidationError)

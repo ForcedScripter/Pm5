@@ -30,7 +30,7 @@ const fail = (m) => { console.error("FAIL:", m); process.exitCode = 1; };
     const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     if (overflow > 1) fail(`${vp.name}: horizontal overflow ${overflow}px`);
 
-    for (const [path, marker] of [["/settings", "Strategy configuration"], ["/history", "Trade history"], ["/logs", "Execution log"], ["/signals", "The six coins"]]) {
+    for (const [path, marker] of [["/settings", "Strategy configuration"], ["/history", "Trade history"], ["/backtest", "History available"], ["/logs", "Execution log"], ["/signals", "The six coins"]]) {
       await p.goto(base + path);
       await p.waitForSelector(`text=${marker}`, { timeout: 15000 }).catch(() => fail(`${vp.name}: ${path} missing "${marker}"`));
       await p.waitForTimeout(path === "/signals" ? 4000 : 1200);

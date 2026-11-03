@@ -102,26 +102,8 @@ class Registry:
         return parse_gamma_event(asset, start, r.json())
 
     async def upsert(self, f: dict) -> MarketInfo:
-        start = dt.datetime.fromtimestamp(f["start"], dt.UTC)
-        values = {"condition_id": f["condition_id"], "slug": f["slug"], "asset": f["asset"], "question": f["question"],
-                  "window_start": start, "window_end": start + dt.timedelta(seconds=WINDOW),
-                  "tick_size": Decimal(str(f["tick_size"])), "min_order_size": Decimal(str(f["min_size"])),
-                  "neg_risk": f["neg_risk"], "resolution_source": f["resolution_source"],
-                  "fees_enabled": f.get("fees_enabled", True), "fee_rate": Decimal(str(f.get("fee_rate", 0.07))),
-                  "fee_exponent": Decimal(str(f.get("fee_exponent", 1)))}
-        async with SessionLocal() as db:
-            stmt = insert(Market).values(id=uuid.uuid4(), **values)
-            stmt = stmt.on_conflict_do_update(index_elements=["slug"], set_={k: stmt.excluded[k] for k in
-                                              ("question", "tick_size", "min_order_size", "neg_risk", "resolution_source",
-                                               "fees_enabled", "fee_rate", "fee_exponent")})
-            mid = (await db.execute(stmt.returning(Market.id))).scalar_one()
-            for outcome, tok in (("UP", f["up_token"]), ("DOWN", f["down_token"])):
-                await db.execute(insert(MarketToken).values(id=uuid.uuid4(), market_id=mid, token_id=tok, outcome=outcome)
-                                 .on_conflict_do_nothing())
-            await db.commit()
-        return MarketInfo(mid, f["asset"], f["slug"], f["question"], f["start"], f["start"] + WINDOW, f["condition_id"],
-                          f["up_token"], f["down_token"], f["tick_size"], f["min_size"], f["liquidity"],
-                          f.get("fee_rate", 0.07), f.get("fee_exponent", 1.0))
+        return await upsert_market(f)
+
 
     async def run(self) -> None:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -191,3 +173,27 @@ class Registry:
                     m.closed, m.winner, m.resolved_at = True, f["winner"], dt.datetime.now(dt.UTC)
                     log.info("resolved %s → %s", m.slug, f["winner"])
             await db.commit()
+
+
+async def upsert_market(f: dict) -> MarketInfo:
+    from app.database.session import sessions
+    start = dt.datetime.fromtimestamp(f["start"], dt.UTC)
+    values = {"condition_id": f["condition_id"], "slug": f["slug"], "asset": f["asset"], "question": f["question"],
+              "window_start": start, "window_end": start + dt.timedelta(seconds=WINDOW),
+              "tick_size": Decimal(str(f["tick_size"])), "min_order_size": Decimal(str(f["min_size"])),
+              "neg_risk": f["neg_risk"], "resolution_source": f["resolution_source"],
+              "fees_enabled": f.get("fees_enabled", True), "fee_rate": Decimal(str(f.get("fee_rate", 0.07))),
+              "fee_exponent": Decimal(str(f.get("fee_exponent", 1)))}
+    async with sessions()() as db:
+        stmt = insert(Market).values(id=uuid.uuid4(), **values)
+        stmt = stmt.on_conflict_do_update(index_elements=["slug"], set_={k: stmt.excluded[k] for k in
+                                          ("question", "tick_size", "min_order_size", "neg_risk", "resolution_source",
+                                           "fees_enabled", "fee_rate", "fee_exponent")})
+        mid = (await db.execute(stmt.returning(Market.id))).scalar_one()
+        for outcome, tok in (("UP", f["up_token"]), ("DOWN", f["down_token"])):
+            await db.execute(insert(MarketToken).values(id=uuid.uuid4(), market_id=mid, token_id=tok, outcome=outcome)
+                             .on_conflict_do_nothing())
+        await db.commit()
+    return MarketInfo(mid, f["asset"], f["slug"], f["question"], f["start"], f["start"] + WINDOW, f["condition_id"],
+                      f["up_token"], f["down_token"], f["tick_size"], f["min_size"], f["liquidity"],
+                      f.get("fee_rate", 0.07), f.get("fee_exponent", 1.0))

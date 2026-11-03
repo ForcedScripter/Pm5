@@ -46,7 +46,10 @@ class Dataset:
     market_ids: list[str]
 
 
-async def build_dataset(db: AsyncSession, since: dt.datetime, until: dt.datetime) -> Dataset:
+BACKFILL_HALF_SPREAD = 0.005    # modeled half spread for backfilled rounds (median live spread is ~1¢)
+
+
+async def build_dataset(db: AsyncSession, since: dt.datetime, until: dt.datetime, include_backfill: bool = True) -> Dataset:
     markets = (await db.execute(text("""
         select id::text, asset, extract(epoch from window_start)::bigint as ws, winner
         from markets where closed and winner is not null and window_start >= :a and window_end <= :b
@@ -76,11 +79,24 @@ async def build_dataset(db: AsyncSession, since: dt.datetime, until: dt.datetime
     by_market: dict[str, list[tuple[float, float, float]]] = {}
     for s in snaps:
         by_market.setdefault(s.market_id, []).append((float(s.at_s), float(s.up_ask), float(s.down_ask)))
+    backfilled: set[str] = set()
+    if include_backfill:
+        # rounds with no recorded book: one token price per minute; asks modeled as price ± half spread
+        missing = [m.id for m in markets if m.id not in by_market]
+        if missing:
+            pts = (await db.execute(text("""select mt.market_id::text as mid, extract(epoch from t.ts) as at_s, t.price
+                from token_price_history t join market_tokens mt on mt.token_id = t.token_id and mt.outcome = 'UP'
+                where mt.market_id = any(cast(:ids as uuid[])) order by 1, 2"""), {"ids": missing})).all()
+            h = BACKFILL_HALF_SPREAD
+            for r in pts:
+                pu = float(r.price)
+                by_market.setdefault(r.mid, []).append((float(r.at_s), min(0.99, pu + h), min(0.99, 1 - pu + h)))
+                backfilled.add(r.mid)
     # CPU-heavy part off the event loop (a blocked loop makes the market feeds drop us)
-    return await asyncio.to_thread(_assemble, markets, srcs, by_market)
+    return await asyncio.to_thread(_assemble, markets, srcs, by_market, backfilled)
 
 
-def _assemble(markets, srcs, by_market) -> Dataset:
+def _assemble(markets, srcs, by_market, backfilled=frozenset()) -> Dataset:
     X, y, mts, ua, da, mids = [], [], [], [], [], []
     for m in markets:
         sn = by_market.get(m.id)
@@ -90,7 +106,8 @@ def _assemble(markets, srcs, by_market) -> Dataset:
         for k in SAMPLE_SECS:
             t = m.ws + k
             i = int(np.searchsorted(times, t, side="right")) - 1
-            if i < 0 or t - times[i] > 6:
+            max_age = 65 if m.id in backfilled else 6   # recorded books every 5s; backfilled prices every ~60s
+            if i < 0 or t - times[i] > max_age:
                 continue
             _, up, down = sn[i]
             feats = {a: src.features(m.ws, t) for a, src in srcs.items()}
