@@ -52,7 +52,7 @@ async def test_market_endpoints(client, auth):
     from app.database.session import SessionLocal
     from app.models import Market, MarketToken, PriceHistory
 
-    start = dt.datetime(2026, 11, 3, 4, 0, tzinfo=dt.UTC)
+    start = dt.datetime(2020, 1, 1, 4, 0, tzinfo=dt.UTC)   # far from any synthetic test rounds
     async with SessionLocal() as db:
         m = Market(condition_id="0xc1", slug="btc-updown-5m-test", asset="btc", question="q", window_start=start,
                    window_end=start + dt.timedelta(minutes=5), closed=True, winner="UP")
@@ -68,8 +68,9 @@ async def test_market_endpoints(client, auth):
     r = (await client.get(f"/api/markets/{mid}", headers=auth)).json()
     assert r["tokens"] == {"UP": "tU", "DOWN": "tD"} and r["winner"] == "UP"
     assert (await client.get(f"/api/markets/{uuid.uuid4()}", headers=auth)).status_code == 404
-    hist = (await client.get("/api/markets/history?asset=btc", headers=auth)).json()
-    assert hist[0]["slug"] == "btc-updown-5m-test"
+    hist = (await client.get("/api/markets/history?asset=btc&limit=500", headers=auth)).json()
+    assert any(h["slug"] == "btc-updown-5m-test" and h["winner"] == "UP" for h in hist)
+    assert hist == sorted(hist, key=lambda h: -h["start"])
     c = (await client.get("/api/markets/candles/btc?interval=60&limit=5", headers=auth)).json()
     assert 1 <= len(c) <= 5 and all(k in c[0] for k in ("time", "open", "high", "low", "close"))
     assert c == sorted(c, key=lambda x: x["time"])

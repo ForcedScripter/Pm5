@@ -76,3 +76,36 @@ export interface LogEntry {
   message: string;
   data: Record<string, unknown>;
 }
+
+export interface SignalRow {
+  id: string; ts: string; strategy: StrategyKey; asset: string; side: "UP" | "DOWN";
+  status: "accepted" | "rejected" | "executed" | "candidate"; code: string | null; reason: string;
+  price: number; confidence: number | null; secs_in: number; round_start: number | null;
+  outcome: "UP" | "DOWN" | null; won: boolean | null; pnl_per_dollar: number | null; mode: "paper" | "live";
+}
+
+export interface StrategyStats {
+  strategy: StrategyKey; name: string; accepted: number; resolved: number; wins: number;
+  hit_rate: number | null; avg_price: number | null; avg_pnl_per_dollar: number | null;
+  total_pnl_per_dollar: number; breakeven_hit_rate: number | null;
+  skips: { code: string; n: number; resolved: number; would_have_won: number | null }[];
+}
+
+export interface EngineStatus {
+  bot_running: boolean; emergency_stopped: boolean; mode: "paper" | "live"; enabled: StrategyKey[];
+  engine_online: boolean; active_model: string | null;
+  engine: { last_tick: number | null; users: number; errors: number; last_error: string | null; evaluations: number;
+    last_training?: { at: number; ok: boolean; activated: boolean | null; reason: string | null; version: string | null } } | null;
+}
+
+export interface Scores { n: number; base_rate: number | null; logloss: number; brier: number; accuracy: number; auc: number | null }
+export interface SimResult { trades: number; hit_rate: number | null; avg_pnl_per_dollar: number | null; total_pnl_per_dollar: number }
+export interface ModelSummary {
+  version: string; kind: string; trained_at: string | null; active: boolean; n: { train: number; val: number; test: number };
+  data_from: string; data_to: string;
+  metrics: { train: Scores; val: Scores; test: Scores; market_test: Scores; beats_market: boolean; rounds: number;
+    sim_test: SimResult; sim_test_market?: SimResult; coefficients: Record<string, number>;
+    calibration_test: { bin: string; n: number; mean_p: number; hit: number }[] };
+}
+export interface AiModels { models: ModelSummary[]; settled_rounds: number; rounds: number; predictions_logged: number }
+export type TrainResult = { ok: boolean; reason?: string; activated?: boolean; version?: string; rounds?: number };

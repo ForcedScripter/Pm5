@@ -1,17 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Crosshair, Radar } from "lucide-react";
+import { Crosshair, History, Radar } from "lucide-react";
 import { useNow } from "@/components/layout/Shell";
 import { Badge, Empty, Panel, PanelHeader } from "@/components/ui/panel";
 import { ASSETS, ASSET_META, cn, fmtCents, fmtPct, fmtPrice, mmss, tone, windowStart, type Asset } from "@/lib/utils";
 import { Api } from "@/services/api";
 import { useMarket, windowDelta } from "@/stores/market";
 import { DEFAULT_CFG, evaluate, type ConsensusCfg } from "@/strategies/consensus";
+import { SignalTable } from "@/strategies/SignalTable";
+import { useSignalStream } from "@/hooks/useSignalStream";
 
 /** Live six-coin consensus scan using the Constellation config you saved. Computed in the browser
  *  from real prices; it shows what the gates see. Orders are placed only by the engine (Phase 5). */
 export default function Signals() {
   const now = useNow(1000);
+  const live = useSignalStream();
   const spot = useMarket((s) => s.spot);
   const strat = useQuery({ queryKey: ["strategies"], queryFn: Api.strategies });
   const p = strat.data?.find((s) => s.key === "constellation")?.params as Record<string, any> | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -24,7 +27,8 @@ export default function Signals() {
   const deltas = Object.fromEntries(ASSETS.map((a) => [a, windowDelta(spot[a])])) as Record<Asset, number | null>;
   const prices = Object.fromEntries(ASSETS.map((a) => {
     const m = spot[a].market;
-    return [a, { up: m?.up?.ask ?? null, down: m?.down?.ask ?? null }];
+    const current = m && m.start === windowStart();     // ignore last round's settled books at rollover
+    return [a, { up: current ? m.up?.ask ?? null : null, down: current ? m.down?.ask ?? null : null }];
   })) as Record<Asset, { up: number | null; down: number | null }>;
   const r = evaluate(deltas, prices, secsIn, cfg);
   const lead = r.up.count >= r.down.count ? r.up : r.down;
@@ -92,10 +96,16 @@ export default function Signals() {
             </div>
           )}
           <p className="border-t border-line px-4 py-3 text-[11px] leading-relaxed text-tx-dim">
-            Live preview of the gates. No order is placed from this page. Logged, resolved signal history arrives with the engine in Phase 5.
+            Live preview of the gates, computed in your browser. The engine's own decisions, including every skip and its reason, are listed below and scored when each round settles.
           </p>
         </Panel>
       </div>
+
+      <Panel>
+        <PanelHeader icon={<History />} title="Recent signals (all strategies)"
+          right={<Badge className={live ? "border-up/50 text-up" : "border-line-hi text-tx-low"}>{live ? "live" : "connecting"}</Badge>} />
+        <SignalTable />
+      </Panel>
     </div>
   );
 }

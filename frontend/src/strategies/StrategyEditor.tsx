@@ -7,7 +7,10 @@ import { Chips, FieldGroup, NumberField, Segmented, Switch } from "@/components/
 import { ASSETS, ASSET_META, cn } from "@/lib/utils";
 import { Api } from "@/services/api";
 import type { Strategy, StrategyKey } from "@/types/api";
+import { AiModelPanel } from "./AiModelPanel";
 import { DCA_OPTIONS, DCA_PRESETS, MODE_OPTIONS, MODE_PRESETS, VOL_BY_HOUR } from "./presets";
+import { Scorecard } from "./Scorecard";
+import { SignalTable } from "./SignalTable";
 
 type P = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -91,6 +94,9 @@ export function StrategyEditor({ strategy }: { strategy: Strategy }) {
           <Switch checked={strategy.enabled} disabled={toggle.isPending} onCheckedChange={(v) => toggle.mutate(v)} aria-label={`enable ${strategy.name}`} />
         </label>
       </div>
+
+      <Scorecard strategy={k} />
+      {k === "ai_strat" && <AiModelPanel />}
 
       {HAS_MODE.includes(k) && (
         <FieldGroup title="Consensus strictness" hint="Presets fill the entry gates below; you can still edit them.">
@@ -199,6 +205,10 @@ export function StrategyEditor({ strategy }: { strategy: Strategy }) {
           </div>
         </FieldGroup>
       )}
+
+      <FieldGroup title="Recent signals">
+        <div className="glass overflow-hidden"><SignalTable strategy={k} compact /></div>
+      </FieldGroup>
 
       <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-full border border-line-hi bg-bg-0/90 p-2 pl-5 backdrop-blur">
         <span className="text-[12px] text-tx-low">{dirty ? "Unsaved changes" : "Saved"}</span>

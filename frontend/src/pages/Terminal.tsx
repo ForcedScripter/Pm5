@@ -153,7 +153,7 @@ function ActivityLog() {
             <span className="num mr-2 text-tx-dim">{new Date(l.ts).toLocaleTimeString()}</span>
             <span className={cn(l.level === "error" ? "text-down" : l.level === "warn" ? "text-warn" : "text-tx")}>{l.message}</span>
           </div>
-        )) : <Empty>No engine activity yet. Strategy engines start writing here in Phase 5.</Empty>}
+        )) : <Empty>No engine activity yet. Enable a strategy in Settings and press Start bot.</Empty>}
       </div>
     </Panel>
   );

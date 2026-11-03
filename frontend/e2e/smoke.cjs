@@ -52,6 +52,13 @@ const fail = (m) => { console.error("FAIL:", m); process.exitCode = 1; };
       const after = await (await p.request.get(base + "/api/strategies/constellation", { headers: { Authorization: `Bearer ${token}` } })).json();
       if (after.version !== before.version + 1 || after.params.min_consensus === before.params.min_consensus) fail("strategy save did not persist");
       else console.log(`strategy save ok: v${before.version} → v${after.version}, min_consensus ${before.params.min_consensus} → ${after.params.min_consensus}`);
+      // bot control is live and reflects server state
+      const bot = p.locator('header button:has-text("bot")');
+      if (!(await bot.count())) fail("no Start/Stop bot control in header");
+      await p.goto(base + "/signals");
+      await p.waitForSelector("text=Recent signals", { timeout: 10000 }).catch(() => fail("signals history panel missing"));
+      await p.goto(base + "/settings");
+      await p.waitForSelector("text=Calls taken", { timeout: 10000 }).catch(() => fail("strategy scorecard missing"));
       // live gate must refuse without paper record
       const en = p.locator('button:has-text("Enable live trading")');
       if (!(await en.isDisabled())) fail("live enable button should be disabled before acceptance criteria pass");

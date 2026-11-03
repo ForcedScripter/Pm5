@@ -59,21 +59,32 @@ class Hub:
         "registry": FeedHealth("registry", stale_after_s=30),
         "writer": FeedHealth("writer", stale_after_s=30),
     })
-    subscribers: set[asyncio.Queue] = field(default_factory=set)
+    channels: dict[str, set[asyncio.Queue]] = field(default_factory=lambda: {"markets": set(), "signals": set()})
     loop_lag_ms: float = 0.0
 
-    def subscribe(self, maxsize: int = 50) -> asyncio.Queue:
+    @property
+    def subscribers(self) -> set[asyncio.Queue]:
+        return self.channels["markets"]
+
+    def subscribe(self, maxsize: int = 50, channel: str = "markets") -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
-        self.subscribers.add(q)
+        self.channels.setdefault(channel, set()).add(q)
         return q
 
     def unsubscribe(self, q: asyncio.Queue) -> None:
-        self.subscribers.discard(q)
+        for subs in self.channels.values():
+            subs.discard(q)
 
     def publish(self, msg: dict) -> None:
+        self.publish_channel("markets", msg)
+
+    def publish_channel(self, channel: str, msg: dict) -> None:
         """Non-blocking fan-out; a slow client drops its oldest frame instead of stalling feeds."""
+        subs = self.channels.get(channel)
+        if not subs:
+            return
         data = json.dumps(msg, separators=(",", ":"), default=float)
-        for q in list(self.subscribers):
+        for q in list(subs):
             if q.full():
                 with contextlib.suppress(asyncio.QueueEmpty):
                     q.get_nowait()

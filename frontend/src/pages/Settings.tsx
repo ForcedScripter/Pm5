@@ -116,6 +116,14 @@ function RiskPanel() {
   );
 }
 
+function EngineNote() {
+  const e = useQuery({ queryKey: ["engine"], queryFn: Api.engineStatus, refetchInterval: 10_000 });
+  if (!e.data) return null;
+  return <span className={cn("ml-auto text-[11px]", e.data.bot_running ? "text-up" : "text-tx-dim")}>
+    {e.data.bot_running ? `Bot running (${e.data.mode}): enabled strategies are evaluated every second` : "Bot stopped: press Start bot in the header to run enabled strategies"}
+  </span>;
+}
+
 const TAB_BADGE: Record<string, string> = { constellation: "reference default", ai_strat: "ML", pocket_aces: "preset" };
 
 function Strategies() {
@@ -128,7 +136,7 @@ function Strategies() {
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-up/5 px-5 py-3 text-[12px]">
         <span className="font-num tracking-[0.12em] text-tx-low uppercase">Enabled</span>
         {enabled.length ? enabled.map((s) => <Badge key={s.key} className="border-up/50 text-up">{s.name}</Badge>) : <Badge className="border-line-hi text-tx-low">none</Badge>}
-        <span className="ml-auto text-[11px] text-tx-dim">Engines start running enabled strategies in Phase 5 (paper first).</span>
+        <EngineNote />
       </div>
       {q.error && <Empty>{q.error.message}</Empty>}
       {q.data && (

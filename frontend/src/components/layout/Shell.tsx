@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Heart, LogOut, OctagonX, Wallet } from "lucide-react";
+import { Heart, LogOut, OctagonX, Play, Square, Wallet } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -87,6 +87,26 @@ function EmergencyStop() {
   );
 }
 
+function BotControl() {
+  const qc = useQueryClient();
+  const e = useQuery({ queryKey: ["engine"], queryFn: Api.engineStatus, refetchInterval: 10_000 });
+  const run = e.data?.bot_running;
+  const m = useMutation({
+    mutationFn: () => (run ? Api.stopBot() : Api.startBot()),
+    onSettled: () => { qc.invalidateQueries({ queryKey: ["engine"] }); qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["logs"] }); },
+  });
+  return (
+    <span className="relative">
+      <Button variant={run ? "outline" : "gold"} size="sm" className="h-9" loading={m.isPending} onClick={() => m.mutate()}
+        title={run ? `Running: ${e.data?.enabled.join(", ")}` : "Run the enabled strategies (paper)"}>
+        {run ? <><Square className="h-3.5 w-3.5 fill-current text-up" /><span className="hidden sm:inline">Stop bot</span></>
+             : <><Play className="h-3.5 w-3.5 fill-current" /><span className="hidden sm:inline">Start bot</span></>}
+      </Button>
+      {m.error && <span role="alert" className="absolute top-11 right-0 z-30 w-64 rounded-xl border border-down/50 bg-bg-0 px-3 py-2 text-xs text-down shadow-xl">{m.error.message}</span>}
+    </span>
+  );
+}
+
 function Header() {
   const logout = useAuth((s) => s.logout);
   const nav = useNavigate();
@@ -123,6 +143,7 @@ function Header() {
       </nav>
       <div className="ml-auto flex items-center gap-2">
         <FeedStatus />
+        <BotControl />
         <Button variant={addr ? "outline" : "wallet"} size="sm" className="h-9" onClick={() => nav("/settings#wallet")}>
           <Wallet className="h-4 w-4" />{addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "Link Wallet"}
         </Button>

@@ -185,10 +185,15 @@ class PriceHistory(Base):
 
 # ── signals → orders → fills → positions → trades ───────────────────────
 class Signal(TimestampMixin, Base):
+    """Every accepted signal and every near miss (trigger fired but a gate blocked it), with the
+    exact inputs seen at decision time. `outcome`/`pnl_per_dollar` are filled once the market settles:
+    pnl_per_dollar = (1 - token_price)/token_price if the side won, else -1 (before fees)."""
     __tablename__ = "signals"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     strategy_config_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("strategy_configurations.id"))
+    strategy_key: Mapped[str] = mapped_column(String(40), index=True)
+    asset: Mapped[str] = mapped_column(String(10))
     market_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("markets.id"))
     mode: Mapped[str] = mapped_column(TradingMode)
     side: Mapped[str] = mapped_column(Side)
@@ -198,9 +203,13 @@ class Signal(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(SignalStatus, default="candidate")
     reason: Mapped[str] = mapped_column(Text, default="")        # why accepted / rejected
     features: Mapped[dict] = mapped_column(JSONB, default=dict)  # inputs at decision time (no look-ahead)
-    outcome: Mapped[str | None] = mapped_column(Side)            # filled in after resolution
+    outcome: Mapped[str | None] = mapped_column(Side)            # winning side, filled in after resolution
+    won: Mapped[bool | None] = mapped_column(Boolean)
+    pnl_per_dollar: Mapped[Decimal | None] = mapped_column(PRICE)
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (Index("ix_signals_user_created", "user_id", "created_at"),
-                      Index("ix_signals_market", "market_id"))
+                      Index("ix_signals_market", "market_id"),
+                      Index("ix_signals_unresolved", "market_id", postgresql_where="outcome is null"))
 
 
 class Order(TimestampMixin, Base):
@@ -338,6 +347,26 @@ class RiskEvent(Base):
     action: Mapped[str] = mapped_column(String(20))      # blocked | halted | warned
     detail: Mapped[dict] = mapped_column(JSONB, default=dict)
     __table_args__ = (Index("ix_risk_user_ts", "user_id", "ts"),)
+
+
+class MlModel(Base):
+    """Trained AI Strat models. `artifact` holds the fitted model (JSON coefficients for logreg,
+    base64 pickle for GBM); `metrics` holds train/val/test scores and calibration bins."""
+    __tablename__ = "ml_models"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    strategy_key: Mapped[str] = mapped_column(String(40), default="ai_strat")
+    version: Mapped[str] = mapped_column(String(60), unique=True)
+    kind: Mapped[str] = mapped_column(String(20))              # logreg | gbm
+    trained_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    data_from: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    data_to: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    n_train: Mapped[int] = mapped_column(Integer)
+    n_val: Mapped[int] = mapped_column(Integer)
+    n_test: Mapped[int] = mapped_column(Integer)
+    features: Mapped[list] = mapped_column(JSONB)
+    metrics: Mapped[dict] = mapped_column(JSONB)
+    artifact: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ModelPrediction(Base):

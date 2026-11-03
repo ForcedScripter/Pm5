@@ -1,5 +1,5 @@
 import { useAuth } from "@/stores/auth";
-import type { HealthOut, Readiness, SettingsOut, Strategy, WalletOut, LogEntry } from "@/types/api";
+import type { AiModels, EngineStatus, HealthOut, LogEntry, Readiness, SettingsOut, SignalRow, Strategy, StrategyStats, TrainResult, WalletOut } from "@/types/api";
 
 export class ApiError extends Error {
   status: number;
@@ -58,6 +58,16 @@ export const Api = {
   liveDisable: () => api<SettingsOut>("/api/live-trading/disable", { method: "POST" }),
   emergencyStop: () => api<SettingsOut>("/api/emergency-stop", { method: "POST" }),
   emergencyClear: () => api<SettingsOut>("/api/emergency-stop/clear", { method: "POST" }),
+  engineStatus: () => api<EngineStatus>("/api/engine/status"),
+  startBot: () => api<{ ok: boolean; strategies: string[] }>("/api/paper-trading/start", { method: "POST" }),
+  stopBot: () => api<{ ok: boolean }>("/api/paper-trading/stop", { method: "POST" }),
+  signals: (q: { strategy?: string; status?: string; asset?: string; limit?: number } = {}) => {
+    const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v != null && v !== "").map(([k, v]) => [k, String(v)]));
+    return api<SignalRow[]>(`/api/signals?${p}`);
+  },
+  signalStats: () => api<StrategyStats[]>("/api/signals/stats"),
+  aiModels: () => api<AiModels>("/api/ai/models"),
+  aiTrain: (kind: "logreg" | "gbm", days: number) => api<TrainResult>("/api/ai/train", { method: "POST", json: { kind, days } }),
   logs: (category: string, before?: number) =>
     api<LogEntry[]>(`/api/logs?category=${category}${before ? `&before_id=${before}` : ""}`),
 };

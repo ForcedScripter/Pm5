@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.api.engine import router as engine_router, ws_router as engine_ws
 from app.api.markets import router as markets_router, ws_router
 from app.api.routes import router
 from app.market_data.hub import hub
@@ -47,6 +48,8 @@ app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list
 app.include_router(router)
 app.include_router(markets_router)
 app.include_router(ws_router)
+app.include_router(engine_router)
+app.include_router(engine_ws)
 
 
 @app.exception_handler(RequestValidationError)

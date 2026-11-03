@@ -51,14 +51,18 @@ class MarketDataService:
                 self._start_collectors()
 
     def _start_collectors(self) -> None:
+        from app.strategies.engine.runner import StrategyRunner
         log.info("market-data leader: %s", self.node)
+        self.runner = StrategyRunner(self, self.hub)
+        self.tasks.append(asyncio.create_task(self.runner.run()))
         for coro in (self.binance.run(), self.registry.run(), self.books.run(), self._broadcast(), self._renew(),
                      self._retention(), self._loop_lag()):
             self.tasks.append(asyncio.create_task(coro))
 
     async def stop(self) -> None:
-        for svc in (self.binance, self.registry, self.books):
-            svc.stop()
+        for svc in (self.binance, self.registry, self.books, getattr(self, "runner", None)):
+            if svc:
+                svc.stop()
         for t in self.tasks:
             t.cancel()
         for t in self.tasks:
