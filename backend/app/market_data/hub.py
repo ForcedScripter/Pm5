@@ -59,7 +59,7 @@ class Hub:
         "registry": FeedHealth("registry", stale_after_s=30),
         "writer": FeedHealth("writer", stale_after_s=30),
     })
-    channels: dict[str, set[asyncio.Queue]] = field(default_factory=lambda: {"markets": set(), "signals": set()})
+    channels: dict[str, set[asyncio.Queue]] = field(default_factory=lambda: {"markets": set(), "signals": set(), "portfolio": set()})
     loop_lag_ms: float = 0.0
 
     @property

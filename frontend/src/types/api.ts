@@ -109,3 +109,25 @@ export interface ModelSummary {
 }
 export interface AiModels { models: ModelSummary[]; settled_rounds: number; rounds: number; predictions_logged: number }
 export type TrainResult = { ok: boolean; reason?: string; activated?: boolean; version?: string; rounds?: number };
+
+export interface Portfolio {
+  mode: "paper" | "live"; cash: number; positions_value: number; equity: number; invested: number; realized_pnl: number;
+  unrealized_pnl: number; today_realized: number; trades: number; wins: number; win_rate: number | null; open_positions: number;
+  peak_equity: number; drawdown_pct: number; start_equity: number; cash_note?: string;
+}
+export interface PositionRow {
+  id: string; mode: string; strategy: string; asset: string; side: "UP" | "DOWN"; status: string; shares: number; cost_basis: number;
+  avg_price: number | null; fees: number; first_entry_price: number | null; dca_steps: number; bid: number | null; value: number | null;
+  unrealized_pnl: number | null; realized_pnl: number; opened_at: string | null; closed_at: string | null; window_end: string | null;
+  market: string | null; exchange_shares: number | null; reconciled_at: string | null;
+}
+export interface OrderRow {
+  id: string; ts: string | null; asset: string; purpose: string; side: "BUY" | "SELL"; type: string; limit: number; requested: number;
+  filled_shares: number; filled_cost: number; fees: number; status: string; error: string | null; exchange_order_id: string | null;
+  fills: { price: number; shares: number; fee: number; status: string; tx_hash: string | null }[]; mode: string;
+}
+export interface TradeRow {
+  id: string; mode: string; strategy: string; asset: string; side: "UP" | "DOWN"; result: "won" | "lost" | "stopped" | "sold";
+  entry_avg: number; exit_price: number; shares: number; cost: number; proceeds: number; fees: number; pnl: number;
+  opened_at: string; closed_at: string; duration_s: number;
+}

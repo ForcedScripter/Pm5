@@ -3,6 +3,7 @@ token price is the gate. Produces nothing at all until a model with a proven out
 edge over market prices is active (see training.py)."""
 from __future__ import annotations
 
+from app.execution.fees import breakeven_hit_rate, net_pnl_per_dollar
 from app.strategies.ai.features import vector
 from app.strategies.engine.base import Context, Decision, MarketView, decide
 
@@ -32,13 +33,14 @@ def ai_strat(p: dict, view: MarketView, ctx: Context) -> list[Decision]:
         ask = av.book(side).ask
         if ask is None or not 0 < ask < 1:
             continue
-        edge = prob - ask
-        ev = prob * (1 - ask) / ask - (1 - prob)        # expected pnl per $1 staked, before fees
+        # edge over the FEE-ADJUSTED break-even (Polymarket taker fee), not just the price
+        edge = prob - breakeven_hit_rate(ask)
+        ev = prob * net_pnl_per_dollar(ask, True) + (1 - prob) * net_pnl_per_dollar(ask, False)   # per $1, after fees
         pred = {"model_version": version, "p_up": p_up, "probability": prob, "edge": edge,
                 "expected_value": ev, "risk_class": risk_class(edge)}
         extra = [None if edge >= p["min_edge"] else
-                 ("low_edge", f"edge {edge * 100:+.1f}¢ < required {p['min_edge'] * 100:.1f}¢")]
-        trig = f"model P({side})={prob:.3f} vs price {ask:.2f} (edge {edge * 100:+.1f}¢, EV {ev:+.3f}/$)"
+                 ("low_edge", f"edge {edge * 100:+.1f} pts after fees < required {p['min_edge'] * 100:.1f}")]
+        trig = f"model P({side})={prob:.3f} vs price {ask:.2f} + fee (edge {edge * 100:+.1f} pts, EV {ev:+.3f}/$ after fees)"
         out.append(decide("ai_strat", p, view, av, side, trig, round(prob, 4), extra,
                           features={"vector": v}, prediction=pred))
     return out

@@ -14,6 +14,7 @@ import { useMarket } from "@/stores/market";
 const NAV = [
   { to: "/", label: "Terminal" },
   { to: "/settings", label: "Settings" },
+  { to: "/history", label: "History" },
   { to: "/logs", label: "Logs" },
   { to: "/signals", label: "Signals" },
 ];
@@ -52,9 +53,9 @@ function FeedStatus() {
   return (
     <span className="hidden items-center gap-2 rounded-full border border-line-mid bg-bg-0/60 px-3 py-1.5 text-[11px] lg:flex" title={title}>
       <Heart className={cn("h-3.5 w-3.5", ok ? "fill-up text-up" : status === "stale" ? "fill-warn text-warn" : "text-down")} />
-      <span className="text-tx">Market feed</span>
+      <span className="hidden text-tx 2xl:inline">Market feed</span>
       <span className={cn("font-semibold", ok ? "text-amber" : "text-down")}>
-        {status === "connecting" ? "connecting…" : age == null ? status : `last tick ${age}s ago`}
+        {status === "connecting" ? "connecting…" : age == null ? status : <><span className="hidden 2xl:inline">last tick </span>{age}s</>}
       </span>
     </span>
   );
@@ -127,11 +128,11 @@ function Header() {
           v0.3 · {mode}
         </Badge>
       </Link>
-      <nav className="order-last flex w-full justify-center md:order-none md:w-auto md:flex-1" aria-label="main">
-        <div className="flex gap-1 rounded-full border border-line-mid bg-bg-0/50 p-1">
+      <nav className="order-last flex w-full min-w-0 justify-center md:order-none md:w-auto md:flex-1" aria-label="main">
+        <div className="flex max-w-full gap-0.5 overflow-x-auto rounded-full border border-line-mid bg-bg-0/50 p-1 [scrollbar-width:none] sm:gap-1">
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} end={n.to === "/"}
-              className={({ isActive }) => cn("relative rounded-full px-4 py-2 font-num text-xs font-semibold tracking-[0.12em] uppercase transition-colors sm:px-5",
+              className={({ isActive }) => cn("relative shrink-0 rounded-full px-2.5 py-2 font-num text-[11px] font-semibold tracking-[0.08em] uppercase transition-colors sm:px-5 sm:text-xs sm:tracking-[0.12em]",
                 isActive ? "text-[#2a1a06]" : "text-tx-mid hover:text-tx-hi")}>
               {({ isActive }) => (<>
                 {isActive && <motion.span layoutId="navpill" className="gold-pill absolute inset-0 rounded-full" transition={{ type: "spring", stiffness: 420, damping: 34 }} />}

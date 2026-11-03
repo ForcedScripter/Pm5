@@ -116,9 +116,11 @@ async def signal_stats(days: float = 30, user: User = Depends(current_user), db:
     (paper, at the ask seen at decision time, before fees), and why it skipped."""
     since = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
     acc = (await db.execute(text("""
-        select strategy_key, count(*) as n, count(outcome) as resolved, count(*) filter (where won) as wins,
-               avg(token_price) as avg_price, avg(pnl_per_dollar) as avg_pnl, coalesce(sum(pnl_per_dollar), 0) as total_pnl
-        from signals where user_id = :u and status = 'accepted' and created_at >= :s group by 1"""),
+        select s.strategy_key, count(*) as n, count(s.outcome) as resolved, count(*) filter (where s.won) as wins,
+               avg(s.token_price) as avg_price, avg(s.pnl_per_dollar) as avg_pnl, coalesce(sum(s.pnl_per_dollar), 0) as total_pnl,
+               avg(s.token_price + m.fee_rate * power(s.token_price * (1 - s.token_price), m.fee_exponent)) as breakeven
+        from signals s join markets m on m.id = s.market_id
+        where s.user_id = :u and s.status in ('accepted', 'executed') and s.created_at >= :s group by 1"""),
         {"u": user.id, "s": since})).all()
     rej = (await db.execute(text("""
         select strategy_key, features->>'code' as code, count(*) as n,
@@ -134,8 +136,8 @@ async def signal_stats(days: float = 30, user: User = Depends(current_user), db:
                  avg_price=float(r.avg_price) if r.avg_price is not None else None,
                  avg_pnl_per_dollar=float(r.avg_pnl) if r.avg_pnl is not None else None,
                  total_pnl_per_dollar=float(r.total_pnl),
-                 # a binary bought at p only breaks even if it wins p of the time
-                 breakeven_hit_rate=float(r.avg_price) if r.avg_price is not None else None)
+                 # a binary bought at p as a taker breaks even at p + fee (Polymarket's taker fee)
+                 breakeven_hit_rate=float(r.breakeven) if r.breakeven is not None else None)
     for r in rej:
         out[r.strategy_key]["skips"].append({"code": r.code, "n": r.n, "resolved": r.resolved,
                                              "would_have_won": (r.would_win / r.resolved) if r.resolved else None})

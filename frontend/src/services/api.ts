@@ -1,5 +1,5 @@
 import { useAuth } from "@/stores/auth";
-import type { AiModels, EngineStatus, HealthOut, LogEntry, Readiness, SettingsOut, SignalRow, Strategy, StrategyStats, TrainResult, WalletOut } from "@/types/api";
+import type { AiModels, EngineStatus, HealthOut, LogEntry, OrderRow, Portfolio, PositionRow, Readiness, SettingsOut, SignalRow, Strategy, StrategyStats, TradeRow, TrainResult, WalletOut } from "@/types/api";
 
 export class ApiError extends Error {
   status: number;
@@ -68,6 +68,13 @@ export const Api = {
   signalStats: () => api<StrategyStats[]>("/api/signals/stats"),
   aiModels: () => api<AiModels>("/api/ai/models"),
   aiTrain: (kind: "logreg" | "gbm", days: number) => api<TrainResult>("/api/ai/train", { method: "POST", json: { kind, days } }),
+  portfolio: (mode?: string) => api<Portfolio>(`/api/portfolio${mode ? `?mode=${mode}` : ""}`),
+  positions: (mode: string, status = "open") => api<PositionRow[]>(`/api/positions?mode=${mode}&status=${status}`),
+  orders: (mode: string, limit = 100) => api<OrderRow[]>(`/api/orders?mode=${mode}&limit=${limit}`),
+  trades: (q: { mode: string; asset?: string; strategy?: string; result?: string; from?: string; to?: string }) => {
+    const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v).map(([k, v]) => [k, String(v)]));
+    return api<TradeRow[]>(`/api/trades?${p}`);
+  },
   logs: (category: string, before?: number) =>
     api<LogEntry[]>(`/api/logs?category=${category}${before ? `&before_id=${before}` : ""}`),
 };

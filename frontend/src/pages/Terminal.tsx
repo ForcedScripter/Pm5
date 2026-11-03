@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { useNow } from "@/components/layout/Shell";
 import { Badge, Empty, Panel, PanelHeader, Stat } from "@/components/ui/panel";
 import { useOrderbook, type Book } from "@/hooks/useOrderbook";
+import { usePortfolioStream } from "@/hooks/usePortfolioStream";
 import { ASSETS, ASSET_META, cn, fmtCents, fmtPct, fmtPrice, fmtUsd, mmss, tone, windowStart, type Asset } from "@/lib/utils";
 import { CandleChart } from "@/markets/CandleChart";
 import { Sparkline } from "@/markets/Sparkline";
@@ -68,35 +69,38 @@ function BtcRegime() {
 }
 
 function YourNumbers() {
-  const r = useQuery({ queryKey: ["readiness"], queryFn: Api.readiness, refetchInterval: 15_000 });
-  const p = r.data?.paper;
+  const pf = useQuery({ queryKey: ["portfolio"], queryFn: () => Api.portfolio(), refetchInterval: 10_000 });
+  const p = pf.data;
+  const cell = (l: string, v: string, t?: string) => (
+    <div><div className="panel-title !text-[10px]">{l}</div><div className={cn("num mt-1 text-xl font-semibold text-tx-hi", t)}>{v}</div></div>
+  );
   return (
     <Panel>
-      <PanelHeader icon={<LineChart />} title="Your numbers" right={<Badge className="border-azure/40 text-azure">paper</Badge>} />
+      <PanelHeader icon={<LineChart />} title="Your numbers" right={<Badge className={p?.mode === "live" ? "border-up/50 text-up" : "border-azure/40 text-azure"}>{p?.mode ?? "paper"}</Badge>} />
       <div className="grid grid-cols-2 gap-4 px-4 py-4">
-        <div><div className="panel-title !text-[10px]">Trades placed</div><div className="num mt-1 text-xl font-semibold text-tx-hi">{p?.trades ?? "—"}</div></div>
-        <div><div className="panel-title !text-[10px]">Win rate</div><div className="num mt-1 text-xl font-semibold text-tx-hi">{p && p.trades ? `${(p.win_rate * 100).toFixed(1)}%` : "—"}</div></div>
-        <div><div className="panel-title !text-[10px]">Profit factor</div><div className="num mt-1 text-xl font-semibold text-tx-hi">{p && p.trades ? (Number.isFinite(p.profit_factor) ? p.profit_factor.toFixed(2) : "∞") : "—"}</div></div>
-        <div><div className="panel-title !text-[10px]">Days tracked</div><div className="num mt-1 text-xl font-semibold text-tx-hi">{p ? p.days.toFixed(1) : "—"}</div></div>
+        {cell("Equity", fmtUsd(p?.equity))}
+        {cell("Invested now", fmtUsd(p?.invested))}
+        {cell("Today", fmtUsd(p?.today_realized, true), tone(p?.today_realized))}
+        {cell("Peak equity", fmtUsd(p?.peak_equity))}
       </div>
     </Panel>
   );
 }
 
 function Kpis() {
-  const settings = useQuery({ queryKey: ["settings"], queryFn: Api.settings, refetchInterval: 10_000 });
-  const rd = useQuery({ queryKey: ["readiness"], queryFn: Api.readiness, refetchInterval: 15_000 });
+  const pf = useQuery({ queryKey: ["portfolio"], queryFn: () => Api.portfolio(), refetchInterval: 10_000 });
   const btc = useMarket((s) => s.spot.btc);
   const regime = btcRegime(btc.change1h);
   const now = useNow();
   const left = windowStart() + 300 - now / 1000;
-  const p = rd.data?.paper;
+  const p = pf.data;
+  const total = p ? p.realized_pnl + p.unrealized_pnl : null;
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 min-[1700px]:grid-cols-6">
-      <Stat label="Bankroll" value={fmtUsd(settings.data?.paper_bankroll)} sub={settings.data?.live_trading_enabled ? "live wallet" : "paper bankroll"} accent="#5cc8ff" />
-      <Stat label="Total P&L" value={fmtUsd(p?.pnl ?? null, true)} tone={tone(p?.pnl)} sub="settled trades" accent="#35d49a" />
-      <Stat label={`Trades (${p?.trades ?? 0})`} value={p?.trades ? `${p.wins}W / ${p.trades - p.wins}L` : "—"} accent="#c6b28c" />
-      <Stat label="Win rate" value={p?.trades ? `${(p.win_rate * 100).toFixed(1)}%` : "—"} accent="#f79240" />
+      <Stat label="Bankroll" value={fmtUsd(p?.cash)} sub={p ? `${p.mode} · + positions ${fmtUsd(p.positions_value)}` : ""} accent="#5cc8ff" />
+      <Stat label="Total P&L" value={fmtUsd(total, true)} tone={tone(total)} sub={p ? `realized ${fmtUsd(p.realized_pnl, true)}` : ""} accent="#35d49a" />
+      <Stat label={`Trades (${p?.trades ?? 0})`} value={p?.trades ? `${p.wins}W / ${p.trades - p.wins}L` : "—"} sub={p ? `${p.open_positions} open` : ""} accent="#c6b28c" />
+      <Stat label="Win rate" value={p?.win_rate != null ? `${(p.win_rate * 100).toFixed(1)}%` : "—"} sub={p ? `drawdown ${p.drawdown_pct.toFixed(1)}%` : ""} accent="#f79240" />
       <Stat label="BTC filter" value={regime.state === "UNKNOWN" ? "—" : regime.state} tone={regime.state === "NORMAL" ? "text-up" : "text-down"} sub={fmtPct(btc.change1h)} accent="#ffd36e" />
       <Stat label="Round left" value={mmss(left)} sub="Chainlink settles" accent="#ff5a76" />
     </div>
@@ -142,12 +146,39 @@ function OrderBook({ asset }: { asset: Asset }) {
   );
 }
 
+function OpenPositions() {
+  const pf = useQuery({ queryKey: ["portfolio"], queryFn: () => Api.portfolio(), refetchInterval: 10_000 });
+  const mode = pf.data?.mode ?? "paper";
+  const q = useQuery({ queryKey: ["positions", mode], queryFn: () => Api.positions(mode), refetchInterval: 3000 });
+  return (
+    <Panel>
+      <PanelHeader icon={<Briefcase />} title="Positions open" right={<Link to="/history" className="font-num text-[11px] font-semibold tracking-wider text-tx-mid uppercase hover:text-amber">History ›</Link>} />
+      {!q.data?.length ? <Empty>Nothing open right now.</Empty> : (
+        <div className="divide-y divide-line">
+          {q.data.map((p) => (
+            <div key={p.id} className="px-4 py-2.5 text-[12px]">
+              <div className="flex items-center justify-between">
+                <span className="font-num font-bold text-tx-hi">{p.asset.toUpperCase()} <span className={p.side === "UP" ? "text-up" : "text-down"}>{p.side}</span>
+                  <span className="ml-2 font-sans text-[11px] font-normal text-tx-low">{p.strategy}{p.dca_steps > 1 ? ` · DCA ×${p.dca_steps - 1}` : ""}</span></span>
+                <span className={cn("num font-semibold", tone(p.unrealized_pnl))}>{p.status === "awaiting_resolution" ? "settling…" : fmtUsd(p.unrealized_pnl, true)}</span>
+              </div>
+              <div className="num mt-0.5 flex justify-between text-tx-low">
+                <span>{p.shares.toFixed(2)} sh @ {fmtCents(p.avg_price)} · cost {fmtUsd(p.cost_basis)}</span><span>bid {fmtCents(p.bid)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function ActivityLog() {
   const logs = useQuery({ queryKey: ["logs", "all"], queryFn: () => Api.logs("all"), refetchInterval: 5000 });
   return (
-    <Panel className="flex min-h-[260px] flex-1 flex-col">
+    <Panel className="flex h-[560px] flex-col">
       <PanelHeader icon={<Activity />} title="Activity log" right={<Link to="/logs" className="font-num text-[11px] font-semibold tracking-wider text-tx-mid uppercase hover:text-amber">Expand ›</Link>} />
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {logs.data?.length ? logs.data.slice(0, 40).map((l) => (
           <div key={l.id} className="border-b border-dashed border-line px-4 py-1.5 text-[12px]">
             <span className="num mr-2 text-tx-dim">{new Date(l.ts).toLocaleTimeString()}</span>
@@ -160,6 +191,7 @@ function ActivityLog() {
 }
 
 export default function Terminal() {
+  usePortfolioStream();
   const [asset, setAsset] = useState<Asset>("btc");
   const s = useMarket((st) => st.spot[asset]);
   const delta = windowDelta(s);
@@ -169,7 +201,7 @@ export default function Terminal() {
       <div className="space-y-4"><Watchlist selected={asset} onSelect={setAsset} /><BtcRegime /><YourNumbers /></div>
       <div className="flex min-w-0 flex-col gap-4">
         <Panel className="p-3"><Kpis /></Panel>
-        <Panel className="relative flex min-h-[460px] flex-1 flex-col p-4">
+        <Panel className="relative flex h-[620px] flex-col p-4">
           <div className="flex items-start justify-between gap-3">
             <motion.div key={asset} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="glass px-5 py-3.5">
               <div className="font-num text-lg font-bold text-tx-hi">{ASSET_META[asset].sym}/USD</div>
@@ -194,10 +226,7 @@ export default function Terminal() {
       </div>
       <div className="flex flex-col gap-4">
         <OrderBook asset={asset} />
-        <Panel>
-          <PanelHeader icon={<Briefcase />} title="Positions open" />
-          <Empty>Nothing open right now. Paper and live positions appear here once the execution engine lands (Phase 6).</Empty>
-        </Panel>
+        <OpenPositions />
         <ActivityLog />
       </div>
     </div>

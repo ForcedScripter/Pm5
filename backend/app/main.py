@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.api.engine import router as engine_router, ws_router as engine_ws
 from app.api.markets import router as markets_router, ws_router
+from app.api.portfolio import router as portfolio_router, ws_router as portfolio_ws
 from app.api.routes import router
 from app.market_data.hub import hub
 from app.market_data.service import start_market_data
@@ -50,6 +51,8 @@ app.include_router(markets_router)
 app.include_router(ws_router)
 app.include_router(engine_router)
 app.include_router(engine_ws)
+app.include_router(portfolio_router)
+app.include_router(portfolio_ws)
 
 
 @app.exception_handler(RequestValidationError)

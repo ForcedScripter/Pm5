@@ -72,8 +72,10 @@ def test_scores_calibration_and_simulation():
     ds = Dataset(np.zeros((4, 1)), np.array([1, 1, 0, 0]), np.array([0, 0, 300, 300]),
                  np.array([0.5, 0.5, 0.6, 0.6]), np.array([0.5, 0.5, 0.4, 0.4]), ["a", "a", "b", "b"])
     sim = simulate(ds, np.ones(4, bool), np.array([0.7, 0.9, 0.3, 0.2]), 0.6, 0.03)
-    # round a: buy UP @0.50 (wins +1.0); round b: buy DOWN @0.40 (wins +1.5); one entry per round
-    assert sim["trades"] == 2 and sim["hit_rate"] == 1.0 and sim["avg_pnl_per_dollar"] == pytest.approx(1.25)
+    # round a: buy UP @0.50, round b: buy DOWN @0.40; one entry per round; net of taker fees
+    from app.execution.fees import net_pnl_per_dollar
+    assert sim["trades"] == 2 and sim["hit_rate"] == 1.0
+    assert sim["avg_pnl_per_dollar"] == pytest.approx((net_pnl_per_dollar(0.5, True) + net_pnl_per_dollar(0.4, True)) / 2)
 
 
 class FakeModel:
@@ -96,8 +98,9 @@ def test_ai_strat_requires_model_and_edge():
     p = defaults("ai_strat") | {"assets": ["btc"]}
     assert ai_strat(p, _view(0.5, 0.5), Context()) == []                         # no model: silent
     (d,) = ai_strat(p, _view(0.55, 0.46), Context(predictor=("v1", FakeModel(0.70))))
-    assert d.status == "accepted" and d.side == "UP" and d.prediction["edge"] == pytest.approx(0.15)
-    assert d.prediction["expected_value"] == pytest.approx(0.7 * 0.45 / 0.55 - 0.3)
+    from app.execution.fees import breakeven_hit_rate, net_pnl_per_dollar
+    assert d.status == "accepted" and d.side == "UP" and d.prediction["edge"] == pytest.approx(0.70 - breakeven_hit_rate(0.55))
+    assert d.prediction["expected_value"] == pytest.approx(0.7 * net_pnl_per_dollar(0.55, True) + 0.3 * net_pnl_per_dollar(0.55, False))
     (d,) = ai_strat(p, _view(0.69, 0.32), Context(predictor=("v1", FakeModel(0.70))))
     assert d.status == "rejected" and d.code == "low_edge"
     assert ai_strat(p, _view(0.5, 0.5), Context(predictor=("v1", FakeModel(0.55)))) == []   # < min_probability

@@ -119,9 +119,10 @@ async def test_outcomes_scored_after_settlement(frozen):
     async with SessionLocal() as db:
         s = (await db.execute(select(Signal))).scalar_one()
         settle = (await db.execute(select(ExecutionLog).where(ExecutionLog.category == "settle"))).scalar_one()
-    assert s.won and s.outcome == "UP" and float(s.pnl_per_dollar) == pytest.approx((1 - 0.52) / 0.52, rel=1e-4)
+    fee = (1 / 0.52) * 0.07 * (0.52 * 0.48)                  # Polymarket taker fee on $1 at 52¢
+    assert s.won and s.outcome == "UP" and float(s.pnl_per_dollar) == pytest.approx((1 - 0.52) / 0.52 - fee, rel=1e-4)
     assert "WIN" in settle.message
-    assert pnl_per_dollar(0.4, False) == -1.0
+    assert pnl_per_dollar(0.4, False) == pytest.approx(-1 - 2.5 * 0.07 * 0.24)
 
 
 async def test_restart_mid_round_cannot_double_accept(frozen):

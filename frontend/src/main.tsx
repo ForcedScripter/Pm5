@@ -11,6 +11,7 @@ import "./index.css";
 const Settings = lazy(() => import("@/pages/Settings"));
 const Logs = lazy(() => import("@/pages/Logs"));
 const Signals = lazy(() => import("@/pages/Signals"));
+const History = lazy(() => import("@/pages/History"));
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 
@@ -28,6 +29,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Protected><Terminal /></Protected>} />
           <Route path="/settings" element={<Protected><Settings /></Protected>} />
+          <Route path="/history" element={<Protected><History /></Protected>} />
           <Route path="/logs" element={<Protected><Logs /></Protected>} />
           <Route path="/signals" element={<Protected><Signals /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />

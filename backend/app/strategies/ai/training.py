@@ -28,6 +28,7 @@ import numpy as np
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.execution.fees import breakeven_hit_rate, net_pnl_per_dollar
 from app.models import MlModel
 from app.strategies.ai.features import ASSETS, FEATURES, ArraySource, vector
 
@@ -132,7 +133,7 @@ def calibration_bins(y, p, n=10) -> list[dict]:
 
 
 def simulate(ds: Dataset, mask, p_up, min_prob: float, min_edge: float) -> dict:
-    """First qualifying entry per round on the masked rows; pnl per $1 at the ask, before fees."""
+    """First qualifying entry per round on the masked rows; pnl per $1 at the ask, after taker fees."""
     trades, seen = [], set()
     idx = np.where(mask)[0]
     for j, i in enumerate(idx):
@@ -142,10 +143,10 @@ def simulate(ds: Dataset, mask, p_up, min_prob: float, min_edge: float) -> dict:
         pu = p_up[j]
         side_up = pu >= 0.5
         prob, ask = (pu, ds.up_ask[i]) if side_up else (1 - pu, ds.down_ask[i])
-        if prob >= min_prob and prob - ask >= min_edge and 0 < ask < 1:
+        if 0 < ask < 1 and prob >= min_prob and prob - breakeven_hit_rate(ask) >= min_edge:
             seen.add(mid)
             won = (ds.y[i] == 1) == side_up
-            trades.append((1 - ask) / ask if won else -1.0)
+            trades.append(net_pnl_per_dollar(ask, won))          # after Polymarket taker fees
     t = np.array(trades)
     return {"trades": int(len(t)), "hit_rate": float((t > 0).mean()) if len(t) else None,
             "avg_pnl_per_dollar": float(t.mean()) if len(t) else None, "total_pnl_per_dollar": float(t.sum()) if len(t) else 0.0}

@@ -22,6 +22,7 @@ from sqlalchemy import select, text
 from app.database.session import SessionLocal
 from app.market_data.bars import features
 from app.market_data.hub import ASSETS
+from app.execution.fees import net_pnl_per_dollar
 from app.models import ExecutionLog, Market, ModelPrediction, Signal, Strategy, StrategyConfiguration, UserSettings
 from app.strategies.ai.strategy import ai_strat
 from app.strategies.ai.training import active_model, train
@@ -35,8 +36,9 @@ STRATEGIES = {**RULE_STRATEGIES, "ai_strat": ai_strat}
 NOT_NEAR_MISS = {"too_early", "too_late", "no_book"}
 
 
-def pnl_per_dollar(price: float, won: bool) -> float:
-    return (1 - price) / price if won else -1.0
+def pnl_per_dollar(price: float, won: bool, fee_rate: float = 0.07, fee_exponent: float = 1.0) -> float:
+    """Per $1 bought at `price` as a taker, held to settlement, NET of Polymarket's taker fee."""
+    return net_pnl_per_dollar(price, won, fee_rate, fee_exponent)
 
 
 class StrategyRunner:
@@ -224,20 +226,22 @@ class StrategyRunner:
 
     async def resolve_outcomes(self) -> int:
         async with SessionLocal() as db:
-            rows = (await db.execute(select(Signal, Market.winner).join(Market, Market.id == Signal.market_id)
+            rows = (await db.execute(select(Signal, Market.winner, Market.fee_rate, Market.fee_exponent)
+                                     .join(Market, Market.id == Signal.market_id)
                                      .where(Signal.outcome.is_(None), Market.closed, Market.winner.is_not(None))
                                      .limit(500))).all()
             now = dt.datetime.now(dt.UTC)
-            for sig, winner in rows:
+            for sig, winner, fee_rate, fee_exp in rows:
                 won = sig.side == winner
                 sig.outcome, sig.won, sig.resolved_at = winner, won, now
                 price = float(sig.token_price)
-                sig.pnl_per_dollar = Decimal(str(round(pnl_per_dollar(price, won), 6))) if 0 < price < 1 else None
+                sig.pnl_per_dollar = (Decimal(str(round(pnl_per_dollar(price, won, float(fee_rate), float(fee_exp)), 6)))
+                                      if 0 < price < 1 else None)
                 if sig.status == "accepted":
                     db.add(ExecutionLog(user_id=sig.user_id, level="info", category="settle", signal_id=sig.id,
                                         message=f"[{sig.strategy_key}] {sig.asset.upper()} {sig.side} @ {price * 100:.1f}¢ "
                                                 f"→ round settled {winner}: {'WIN' if won else 'LOSS'} "
-                                                f"({float(sig.pnl_per_dollar or 0):+.2f} per $1)",
+                                                f"({float(sig.pnl_per_dollar or 0):+.2f} per $1 after fees)",
                                         data={"won": won}))
             await db.commit()
             return len(rows)
