@@ -11,10 +11,10 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user, sensitive_limit
-from app.backtesting import backfill as bf
 from app.backtesting import metrics as M
 from app.backtesting import service as svc
-from app.database.session import get_db, run_isolated
+from app.backtesting import worker
+from app.database.session import get_db
 from app.models import Backtest, Trade, User, UserSettings
 from app.strategies.catalog import CATALOG
 
@@ -50,7 +50,8 @@ def _summary(b: Backtest) -> dict:
     o = (b.results or {}).get("overall") or {}
     return {"id": str(b.id), "name": b.name, "status": b.status, "created_at": b.created_at.isoformat() if b.created_at else None,
             "finished_at": b.finished_at.isoformat() if b.finished_at else None, "error": b.error,
-            "progress": svc.progress.get(str(b.id), float(b.progress or 0)),
+            "progress": (worker.read(f"bt:{b.id}") or {}).get("progress", float(b.progress or 0)) if b.status == "running"
+                        else float(b.progress or 0),
             "period": [b.period_from.isoformat(), b.period_to.isoformat()], "strategies": b.params.get("strategies"),
             "trades": o.get("trades"), "net_pnl": o.get("net_pnl"), "win_rate": o.get("win_rate"), "profit_factor": o.get("profit_factor")}
 
@@ -58,20 +59,20 @@ def _summary(b: Backtest) -> dict:
 @router.post("/backtests", status_code=202, dependencies=[Depends(sensitive_limit)])
 async def create_backtest(body: BacktestIn, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     mine = (await db.execute(select(Backtest.id).where(Backtest.user_id == user.id, Backtest.status.in_(("queued", "running"))))).all()
-    if any(r[0] in svc._running for r in mine):
+    if any(str(r[0]) in worker.running for r in mine):
         raise HTTPException(409, "a backtest is already running; wait for it to finish")
     end = body.end or dt.datetime.now(dt.UTC)
     start = body.start or end - dt.timedelta(days=body.days)
     if start >= end:
         raise HTTPException(422, "start must be before end")
-    bt = Backtest(user_id=user.id, name=body.name or f"{'+'.join(body.strategies)} {start:%m-%d %H:%M}→{end:%m-%d %H:%M}",
+    edge = bool(body.risk.get("max_daily_exposure_usd", 0) >= 1e8)
+    label = f"{'+'.join(body.strategies)} · {(end - start).total_seconds() / 86400:.1f}d · {'edge' if edge else 'my limits'}"
+    bt = Backtest(user_id=user.id, name=body.name or label,
                   params=body.model_dump(mode="json", exclude={"start", "end", "days", "name"}), period_from=start, period_to=end)
     db.add(bt)
     await db.commit()
-    # isolated thread + event loop: a backtest's heavy loading never stalls the live feeds
-    t = asyncio.create_task(asyncio.to_thread(run_isolated, lambda: svc.run(bt.id)))
-    _tasks.add(t)
-    t.add_done_callback(_tasks.discard)
+    # separate worker PROCESS: a backtest's CPU work can never stall the live feeds
+    await worker.submit(str(bt.id), worker._backtest_job, str(bt.id))
     return _summary(bt)
 
 
@@ -94,7 +95,7 @@ async def delete_backtest(bt_id: uuid.UUID, user: User = Depends(current_user), 
     b = await db.get(Backtest, bt_id)
     if not b or b.user_id != user.id:
         raise HTTPException(404, "backtest not found")
-    if bt_id in svc._running:
+    if str(bt_id) in worker.running:
         raise HTTPException(409, "still running")
     await db.delete(b)
     await db.commit()
@@ -107,18 +108,20 @@ class BackfillIn(BaseModel):
 
 @router.post("/backfill", status_code=202, dependencies=[Depends(sensitive_limit)])
 async def start_backfill(body: BackfillIn, _: User = Depends(current_user)):
-    if bf.progress.get("running"):
+    if "backfill" in worker.running:
         raise HTTPException(409, "a backfill is already running")
-    t = asyncio.create_task(asyncio.to_thread(run_isolated, lambda: bf.run_backfill(body.days)))
-    _tasks.add(t)
-    t.add_done_callback(_tasks.discard)
-    await asyncio.sleep(0.05)
-    return dict(bf.progress)
+    worker.publish("backfill", {"running": True, "stage": "starting", "done": 0, "total": None})
+    await worker.submit("backfill", worker._backfill_job, body.days)
+    return worker.read("backfill") or {"running": True}
 
 
 @router.get("/backfill")
 async def backfill_status(_: User = Depends(current_user)):
-    return dict(bf.progress)
+    st = worker.read("backfill") or {"running": False}
+    if st.get("running") and "backfill" not in worker.running:
+        st["running"] = False            # the worker died or the server restarted mid-run
+        st.setdefault("error", "interrupted (server restarted); start it again, it resumes where it stopped")
+    return st
 
 
 @router.get("/data/coverage")

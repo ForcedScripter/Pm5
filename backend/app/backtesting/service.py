@@ -18,6 +18,12 @@ from app.strategies.catalog import validate_params
 
 log = logging.getLogger(__name__)
 progress: dict[str, float] = {}
+
+
+def _progress(key: str, f: float) -> None:
+    progress[key] = f
+    from app.backtesting.worker import publish
+    publish(f"bt:{key}", {"progress": f})
 _running: set[uuid.UUID] = set()
 
 
@@ -81,7 +87,7 @@ async def run(bt_id: uuid.UUID) -> None:
         key = str(bt_id)
         res = await asyncio.to_thread(simulate, data, p["strategies"], params, risk, float(p.get("bankroll", 200)),
                                       float(p.get("latency_s", 2)), float(p.get("extra_slippage", 0)), predictor,
-                                      lambda f: progress.__setitem__(key, f))
+                                      lambda f: _progress(key, f))
         if note:
             res["warnings"].insert(0, note)
             if predictor:

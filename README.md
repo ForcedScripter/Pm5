@@ -18,8 +18,8 @@ console; see `docs/reverse_engineering.md`.
 | 4. Market infrastructure | ✅ Binance + Polymarket collectors, registry, books, features, `/ws/markets` |
 | 5. Strategy engines | ✅ Constellation, Custom BTC/ETH, Pocket Aces, Mean Reversion, AI Strat; signal scoring · `docs/strategies.md` |
 | 6. Execution | ✅ Risk engine, paper and live executors, positions, DCA/stop/TP, settlement, reconciliation · `docs/execution.md` |
-| 7. Backtesting | next |
-| 8. Production hardening | planned |
+| 7. Backtesting | ✅ Public-history backfill, replay engine (same code as live), IS/OOS metrics, Backtest page · `docs/backtesting.md` |
+| 8. Production hardening | next |
 
 `legacy_v0/` holds the first single-file bot. It already paper-trades end to end, and it's
 the reference for porting strategy logic in Phase 5.

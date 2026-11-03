@@ -59,8 +59,13 @@ function RunForm({ onStarted }: { onStarted: (id: string) => void }) {
   const [bankroll, setBankroll] = useState<number | null>(200);
   const [latency, setLatency] = useState<number | null>(2);
   const [slip, setSlip] = useState<number | null>(0);
+  const [riskMode, setRiskMode] = useState<"mine" | "edge">("mine");
+  // "edge": lift only the PORTFOLIO caps so each strategy is judged on its own signals;
+  // per-trade sizing, book gates, fees and latency rules still apply
+  const EDGE_RISK = { max_daily_exposure_usd: 1e9, max_daily_loss_usd: 1e9, max_open_positions: 50, max_drawdown_pct: 100, loss_cooldown_s: 0 };
   const run = useMutation({
-    mutationFn: () => Api.runBacktest({ strategies, days, fidelity, bankroll, latency_s: latency, extra_slippage: slip }),
+    mutationFn: () => Api.runBacktest({ strategies, days, fidelity, bankroll, latency_s: latency, extra_slippage: slip,
+      risk: riskMode === "edge" ? EDGE_RISK : {}, name: undefined }),
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["backtests"] }); onStarted(r.id); },
   });
   return (
@@ -75,6 +80,7 @@ function RunForm({ onStarted }: { onStarted: (id: string) => void }) {
           <NumberField label="Latency" hint="A decision at t executes at the first book at or after t + latency (never at t)." suffix="s" step={1} value={latency} onChange={setLatency} />
           <NumberField label="Extra slippage" hint="Added to every fill price on top of the book's ask/bid." step={0.005} value={slip} onChange={setSlip} />
         </div>
+        <Segmented value={riskMode} onChange={setRiskMode} options={[{ value: "mine", label: "My risk limits", sub: "what the bot would do" }, { value: "edge", label: "Strategy edge", sub: "no portfolio caps" }]} />
         <Segmented value={fidelity} onChange={setFidelity} options={[{ value: "auto", label: "Auto", sub: "best available" }, { value: "recorded", label: "Recorded", sub: "real books only" }, { value: "backfill", label: "Backfill", sub: "public prices" }]} />
         {run.error && <p className="text-sm text-down" role="alert">{run.error.message}</p>}
         <Button variant="gold" className="w-full" loading={run.isPending} disabled={!strategies.length} onClick={() => run.mutate()}><Play className="h-4 w-4" />Run backtest</Button>

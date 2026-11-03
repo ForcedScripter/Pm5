@@ -34,6 +34,11 @@ SYMBOL = {"btc": "BTCUSDT", "eth": "ETHUSDT", "sol": "SOLUSDT", "xrp": "XRPUSDT"
 progress: dict = {"running": False}
 
 
+def _publish() -> None:
+    from app.backtesting.worker import publish
+    publish("backfill", progress)
+
+
 async def _get(client: httpx.AsyncClient, url: str, params: dict, tries: int = 5):
     delay = 1.0
     for i in range(tries):
@@ -123,12 +128,14 @@ async def run_backfill(days: float, assets: tuple[str, ...] = ASSETS, concurrenc
     progress.clear()
     progress.update(running=True, started=t0, stage="bars", done=0, total=len(windows) * len(assets), counts={},
                     period=[start, end], error=None)
+    _publish()
     try:
         async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "pm5bot-backfill/1.0"}) as client:
             bars = 0
             for a in assets:                                            # 1h of lead-in for 1h features
                 bars += await backfill_bars(client, a, start - 3700, end + WINDOW)
             progress.update(stage="markets", bars_added=bars)
+            _publish()
             sem = asyncio.Semaphore(concurrency)
 
             async def one(a, ws):
@@ -139,13 +146,17 @@ async def run_backfill(days: float, assets: tuple[str, ...] = ASSETS, concurrenc
                     progress["error"] = f"{a}@{ws}: {type(e).__name__}: {e}"[:200]
                 progress["counts"][r] = progress["counts"].get(r, 0) + 1
                 progress["done"] += 1
+                if progress["done"] % 50 == 0:
+                    _publish()
 
             for i in range(0, len(windows), 48):                        # 4h of rounds at a time
                 await asyncio.gather(*(one(a, ws) for ws in windows[i:i + 48] for a in assets))
         progress.update(stage="done", seconds=round(time.time() - t0, 1), running=False)
+        _publish()
         return dict(progress)
     except Exception as e:
         progress.update(stage="failed", error=f"{type(e).__name__}: {e}"[:300])
         raise
     finally:
         progress["running"] = False
+        _publish()

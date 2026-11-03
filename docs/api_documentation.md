@@ -68,11 +68,21 @@ Strategy keys: `constellation`, `ai_strat`, `mean_reversion`, `custom_btc`, `cus
 | GET | `/wallet/balance` | Live USDC collateral balance (409 when live isn't active) |
 | WS | `/ws/portfolio` | Auth frame first. Then `order`, `position` (opened/dca/settled), `portfolio` and `emergency` events |
 
+## Implemented (Phase 7): backtesting and analytics
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/backtests` | `{strategies[], days \| start+end, fidelity: auto\|recorded\|backfill, bankroll, latency_s, extra_slippage, ai_kind, overrides{}, risk{}}` → 202 with `{id, status}`. Runs in the worker process; one at a time |
+| GET | `/backtests` · `/backtests/{id}` | Status/progress; `results`: overall, by strategy/asset/fidelity, in- vs out-of-sample split, counts, risk blocks, skips, trades, warnings |
+| DELETE | `/backtests/{id}` | |
+| POST | `/backfill` · GET `/backfill` | `{days ≤ 14}`: download public history; GET shows progress |
+| GET | `/data/coverage` | Settled, recorded and backfilled rounds, time span, spot bar count |
+| GET | `/analytics?mode=&days=` | The backtest metrics computed on your real closed trades |
+
 ## Planned contracts (added in the phase that makes them real)
 
 | Phase | Endpoint | Purpose |
 |---|---|---|
-| 7 | `POST /backtests`, `GET /backtests/{id}`, `GET /analytics` | Backtests and metrics |
 
 WebSocket auth: the client sends `{"type":"auth","token":"…"}` as its first frame. The server
 sends `{"type":"heartbeat","ts"}` every 10s; clients reconnect with backoff after 25s of silence.
