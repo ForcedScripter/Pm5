@@ -58,12 +58,16 @@ class MarketDataService:
         self.orders = OrderManager(self, self.hub)
         self.tasks.append(asyncio.create_task(self.runner.run()))
         self.tasks.append(asyncio.create_task(self.orders.run()))
+        from app.strategies.scalper.engine import ScalperEngine
+        self.scalper = ScalperEngine(self, self.hub, self.orders)
+        self.tasks.append(asyncio.create_task(self.scalper.run()))
         for coro in (self.binance.run(), self.registry.run(), self.books.run(), self._broadcast(), self._renew(),
                      self._retention(), self._loop_lag()):
             self.tasks.append(asyncio.create_task(coro))
 
     async def stop(self) -> None:
-        for svc in (self.binance, self.registry, self.books, getattr(self, "runner", None), getattr(self, "orders", None)):
+        for svc in (self.binance, self.registry, self.books, getattr(self, "runner", None), getattr(self, "orders", None),
+                    getattr(self, "scalper", None)):
             if svc:
                 svc.stop()
         for t in self.tasks:

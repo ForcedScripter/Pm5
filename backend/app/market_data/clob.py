@@ -247,13 +247,18 @@ class BookService:
                     log.info("resynced crossed book %s…", ob.token_id[:10])
 
     async def _sampler(self) -> None:
-        """Every 5s: persist a snapshot of each current market (for backtests / AI features)."""
+        """Persist book snapshots for backtests / AI: every 1s during a round's first 2 minutes (where the
+        Odds Scalper acts on second-level moves), every 5s for the rest of the round."""
+        n = 0
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
+            n += 1
             try:
                 rows, redis_pipe = [], (self.redis.pipeline(transaction=False) if self.redis is not None else None)
                 now = time.time()
                 for a, m in list(self.registry.current.items()):
+                    if now - m.start > 120 and n % 5:
+                        continue
                     up, dn = self.books.get(m.up_token), self.books.get(m.down_token)
                     if not up or not dn or not (up.synced and dn.synced):
                         continue

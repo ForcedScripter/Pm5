@@ -228,7 +228,8 @@ class StrategyRunner:
         async with SessionLocal() as db:
             rows = (await db.execute(select(Signal, Market.winner, Market.fee_rate, Market.fee_exponent)
                                      .join(Market, Market.id == Signal.market_id)
-                                     .where(Signal.outcome.is_(None), Market.closed, Market.winner.is_not(None))
+                                     .where(Signal.outcome.is_(None), Market.closed, Market.winner.is_not(None),
+                                            Signal.strategy_key != "odds_scalper")   # scalps are scored on their exit
                                      .limit(500))).all()
             now = dt.datetime.now(dt.UTC)
             for sig, winner, fee_rate, fee_exp in rows:

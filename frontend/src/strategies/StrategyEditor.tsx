@@ -58,7 +58,31 @@ const SPECIFIC: Record<StrategyKey, { title: string; fields: F[] }> = {
   ] },
   custom_eth: { title: "Directional rules", fields: [] },
   pocket_aces: { title: "Sizing", fields: [] },
+  odds_scalper: { title: "Entry: wait for the multiplier to peak, then reverse", fields: [
+    { path: "min_multiplier", label: "Min multiplier", hint: "Qualify when a side pays at least this much (3.0x = price ≤ 33.3¢).", step: 0.1, suffix: "x" },
+    { path: "max_multiplier", label: "Max multiplier", hint: "Ignore near-dead tokens above this (8x = below 12.5¢).", step: 0.5, suffix: "x" },
+    { path: "qualify_window_s", label: "Detect within", hint: "Only look for qualifying sides in the first N seconds of the round.", step: 5, suffix: "s" },
+    { path: "max_observation_s", label: "Extra entry time", hint: "Entries allowed until the detect window + this.", step: 1, suffix: "s" },
+    { path: "observe_min_s", label: "Observe at least", hint: "Never buy sooner than this after the first qualifying price.", step: 1, suffix: "s" },
+    { path: "reversal_cents", label: "Reversal size", hint: "The ask must rise this many cents off its low (the multiplier peak).", step: 1, suffix: "¢" },
+    { path: "confirm_s", label: "Reversal must hold", hint: "…and stay up this long: no buying on one noisy print.", step: 0.5, suffix: "s" },
+    { path: "max_entry_spread", label: "Max entry spread", step: 0.005 },
+    { path: "min_depth_usd", label: "Min depth at ask", step: 5, suffix: "$" },
+    { path: "max_required_move_cents", label: "Max bounce needed", hint: "Skip if fees on both sides + the profit target need a bigger move than this.", step: 0.5, suffix: "¢" },
+    { path: "stake_usd", label: "Stake per trade", step: 1, suffix: "$" },
+    { path: "slippage", label: "Slippage allowance", step: 0.005 },
+  ] },
 };
+const SCALPER_EXITS: F[] = [
+  { path: "min_net_profit_usd", label: "Min net profit", hint: "After both taker fees, on the actual bid.", step: 0.05, suffix: "$" },
+  { path: "arm_hold_s", label: "Profit must persist", hint: "The position must stay above the min profit this long before trailing starts.", step: 1, suffix: "s" },
+  { path: "trail_cents", label: "Sell on a dip of", hint: "Once armed, sell when the bid falls this much from its high.", step: 1, suffix: "¢" },
+  { path: "max_hold_s", label: "Max holding time", step: 5, suffix: "s" },
+  { path: "stop_loss_cents", label: "Stop-loss", hint: "Sell if the bid falls this far below the entry price.", step: 1, suffix: "¢" },
+  { path: "adverse_drop_cents", label: "Adverse drop", hint: "Sell a losing position if the bid falls this much…", step: 1, suffix: "¢" },
+  { path: "adverse_window_s", label: "…within", step: 1, suffix: "s" },
+  { path: "min_exit_depth_ratio", label: "Min bid size (× shares)", hint: "Take a profitable exit early if buyers at the bid thin out below this.", step: 0.25 },
+];
 SPECIFIC.custom_eth.fields = SPECIFIC.custom_btc.fields;
 
 const HAS_MODE: StrategyKey[] = ["constellation", "custom_btc", "custom_eth"];
@@ -78,6 +102,7 @@ export function StrategyEditor({ strategy }: { strategy: Strategy }) {
 
   const k = strategy.key;
   const locked = k === "pocket_aces";
+  const scalper = k === "odds_scalper";
   const field = (f: F) => <NumberField key={f.path} label={f.label} hint={f.hint} step={f.step} suffix={f.suffix}
     value={get(draft, f.path)} onChange={(v) => upd(f.path, v)} />;
 
@@ -98,6 +123,19 @@ export function StrategyEditor({ strategy }: { strategy: Strategy }) {
       <Scorecard strategy={k} />
       {k === "ai_strat" && <AiModelPanel />}
 
+      {scalper && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <FieldGroup title={SPECIFIC[k].title}><div className="space-y-2.5">{SPECIFIC[k].fields.map(field)}</div></FieldGroup>
+          <FieldGroup title="Exit: trail the bounce, out within the max hold"><div className="space-y-2.5">{SCALPER_EXITS.map(field)}</div></FieldGroup>
+        </div>
+      )}
+      {scalper && (
+        <FieldGroup title="Markets">
+          <Chips values={draft.assets ?? []} options={ASSETS.map((a) => ({ value: a, label: `${ASSET_META[a].glyph} ${ASSET_META[a].sym}` }))}
+            onToggle={(a) => { const s2 = new Set<string>(draft.assets); if (s2.has(a)) s2.delete(a); else s2.add(a); if (s2.size) upd("assets", ASSETS.filter((x) => s2.has(x))); }} />
+        </FieldGroup>
+      )}
+      {!scalper && <>
       {HAS_MODE.includes(k) && (
         <FieldGroup title="Consensus strictness" hint="Presets fill the entry gates below; you can still edit them.">
           <Segmented<keyof typeof MODE_PRESETS> value={draft.mode} options={MODE_OPTIONS.map((o) => ({ ...o }))}
@@ -205,6 +243,8 @@ export function StrategyEditor({ strategy }: { strategy: Strategy }) {
           </div>
         </FieldGroup>
       )}
+
+      </>}
 
       <FieldGroup title="Recent signals">
         <div className="glass overflow-hidden"><SignalTable strategy={k} compact /></div>

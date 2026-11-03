@@ -17,7 +17,7 @@ export interface WalletOut {
   api_creds_ok: boolean;
 }
 
-export type StrategyKey = "constellation" | "ai_strat" | "mean_reversion" | "custom_btc" | "custom_eth" | "pocket_aces";
+export type StrategyKey = "constellation" | "ai_strat" | "mean_reversion" | "custom_btc" | "custom_eth" | "pocket_aces" | "odds_scalper";
 
 export interface Strategy {
   key: StrategyKey;

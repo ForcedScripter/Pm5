@@ -248,8 +248,8 @@ class OrderManager:
     # ── open positions: DCA / stop / take-profit ───────────────────────
     async def manage_positions(self, db, us, mode, ex) -> None:
         for pos in await pf.open_positions(db, us.user_id, mode):
-            if pos.status != "open":
-                continue
+            if pos.status != "open" or pos.strategy_key == "odds_scalper":
+                continue                     # the scalper engine owns its positions' exits
             now = time.time()
             end = pos.window_end.timestamp() if pos.window_end else 0
             if now >= end:

@@ -147,6 +147,36 @@ class PocketAcesParams(Common):
     down_threshold: float = 0.10
 
 
+class OddsScalperParams(BaseModel):
+    """Opening Odds Compression Scalper (user design, see strategies/scalper/core.py). All prices in $,
+    cents fields in ¢. Defaults are starting points to be validated by backtest + paper, not proven."""
+    assets: list[Asset] = ["btc", "eth", "sol", "xrp"]
+    min_multiplier: float = Field(3.0, ge=1.5, le=20)        # qualify: price ≤ 1/min_multiplier
+    max_multiplier: float = Field(8.0, ge=2, le=50)          # ignore near-dead tokens (< 12.5¢)
+    qualify_window_s: int = Field(60, ge=5, le=240)          # detect only in the first N seconds
+    max_observation_s: int = Field(15, ge=1, le=60)          # entries allowed until qualify_window + this
+    observe_min_s: float = Field(3, ge=0, le=30)             # wait at least this long after first qualifying
+    reversal_cents: int = Field(1, ge=1, le=10)              # ask must rise this many ¢ off its low
+    confirm_s: float = Field(1.0, ge=0, le=10)               # …and stay there this long (no single-print entries)
+    max_entry_spread: float = Field(0.02, gt=0, le=0.1)
+    min_depth_usd: float = Field(10, ge=0)
+    max_required_move_cents: float = Field(6, gt=0, le=30)  # skip if fees+target need a bigger bounce
+    stake_usd: float = Field(5, ge=1)
+    slippage: float = Field(0.01, ge=0, le=0.05)
+    # exits
+    min_net_profit_usd: float = Field(0.10, ge=0)            # net after both fees, per position
+    arm_hold_s: float = Field(4, ge=0, le=30)                # profit must persist this long before trailing
+    trail_cents: int = Field(1, ge=1, le=10)                 # sell on the first dip of this size off the peak
+    max_hold_s: float = Field(40, ge=5, le=240)
+    stop_loss_cents: int = Field(4, ge=1, le=30)
+    adverse_drop_cents: int = Field(3, ge=1, le=30)
+    adverse_window_s: float = Field(3, ge=1, le=30)
+    min_exit_depth_ratio: float = Field(1.0, ge=0, le=5)     # exit early if bid size < shares × this
+    skip_hours_utc: list[int] = Field(default_factory=list)
+    fee_rate: float = 0.07                                   # overwritten per market at runtime
+    fee_exp: float = 1.0
+
+
 CATALOG: dict[str, tuple[str, str, type[BaseModel]]] = {
     "constellation": ("Constellation", "Multi-asset consensus; buys the coin that hasn't followed the pack yet.", ConstellationParams),
     "ai_strat": ("AI Strat", "Calibrated ML gate trained on our own logged signals (chronological splits).", AIStratParams),
@@ -154,6 +184,8 @@ CATALOG: dict[str, tuple[str, str, type[BaseModel]]] = {
     "custom_btc": ("Custom BTC", "Your own directional rules for the BTC 5-minute market.", CustomParams),
     "custom_eth": ("Custom ETH", "Your own directional rules for the ETH 5-minute market.", CustomParams),
     "pocket_aces": ("Pocket Aces", "Near-certainty entries 65¢–95¢ (reference community preset).", PocketAcesParams),
+    "odds_scalper": ("Odds Scalper", "Opening-minute scalp: buy a ≥3x side after it bottoms, sell the bounce within 40s.",
+                     OddsScalperParams),
 }
 
 

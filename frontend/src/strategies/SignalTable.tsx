@@ -7,7 +7,7 @@ import type { SignalRow } from "@/types/api";
 
 const STRAT_LABEL: Record<string, string> = {
   constellation: "Constellation", ai_strat: "AI Strat", mean_reversion: "Mean Rev", custom_btc: "Custom BTC",
-  custom_eth: "Custom ETH", pocket_aces: "Pocket Aces",
+  custom_eth: "Custom ETH", pocket_aces: "Pocket Aces", odds_scalper: "Odds Scalper",
 };
 
 function Result({ s }: { s: SignalRow }) {

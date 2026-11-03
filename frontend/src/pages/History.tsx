@@ -6,7 +6,7 @@ import { usePortfolioStream } from "@/hooks/usePortfolioStream";
 import { ASSETS, cn, fmtCents, fmtUsd, tone } from "@/lib/utils";
 import { Api } from "@/services/api";
 
-const STRATS = ["constellation", "ai_strat", "mean_reversion", "custom_btc", "custom_eth", "pocket_aces"];
+const STRATS = ["constellation", "ai_strat", "mean_reversion", "custom_btc", "custom_eth", "pocket_aces", "odds_scalper"];
 const sel = "h-9 rounded-full border border-line-mid bg-bg-0/70 px-3 text-[12px] text-tx-hi focus:border-amber/70 focus:outline-none";
 const dur = (s: number) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${(s / 3600).toFixed(1)}h`);
 
