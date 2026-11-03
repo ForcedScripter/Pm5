@@ -4,6 +4,7 @@ export interface HealthOut {
   redis: boolean;
   config_problems: string[];
   server_time: number;
+  feeds?: Record<string, { name: string; status: string; last_msg_age_s: number | null; reconnects: number; last_error: string | null }>;
 }
 
 export interface WalletOut {

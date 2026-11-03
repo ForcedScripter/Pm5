@@ -1,55 +1,98 @@
 # pm5bot
 
-A self-hosted automated trading platform for Polymarket's 5-minute crypto Up/Down markets
-(BTC, ETH, SOL, XRP, DOGE, BNB). Its features are reconstructed from a public reference
-console; see `docs/reverse_engineering.md`.
+A trading bot for Polymarket's 5-minute crypto **Up/Down** markets (BTC, ETH, SOL, XRP, DOGE, BNB),
+with a web console. It runs **on your own computer**: your wallet key stays on your machine,
+encrypted, and the console is reachable only from that machine.
 
-> ⚠️ Prediction-market trading can lose money. The reference service advertised ~80% win
-> rates, but its own public signal data shows ~54%, which is about break-even. Nothing here
-> is proven profitable until our own paper and out-of-sample results say so.
+> ⚠️ It starts in **paper trading** (simulated orders on real live prices). No strategy here has
+> a proven edge yet: Polymarket's taker fees mean you must win more often than the price you pay,
+> and the backtest on real order books is still too small to judge (see `docs/backtesting.md`).
+> Run it on paper for days before ever considering real money.
 
-## Status
+## Install (once)
 
-| Phase | State |
+1. Install **Docker Desktop** (Windows/Mac) from https://www.docker.com/products/docker-desktop/ and start it.
+   - Windows: let it enable WSL 2 if it asks.
+   - In Docker Desktop → Settings → General, tick **Start Docker Desktop when you sign in**, so the bot comes back after a reboot.
+2. Install **Git** (https://git-scm.com/downloads) and download the code:
+   ```bash
+   git clone https://github.com/ForcedScripter/Pm5 pm5bot
+   ```
+   ```bash
+   cd pm5bot
+   ```
+3. Run the setup script. It creates `.env` with random secrets, builds and starts everything, and prints your login. The first build takes about 5–10 minutes.
+   - **Windows (PowerShell):**
+     ```powershell
+     powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+     ```
+   - **Mac / Linux:**
+     ```bash
+     bash scripts/setup.sh
+     ```
+4. Open **http://localhost:8080** and sign in as `admin` with the printed password. It's also in `.env` as `ADMIN_PASSWORD`.
+
+**Back up your `.env`** (for example to a USB stick or password manager). Its `MASTER_KEY` is the
+only way to decrypt the wallet key you save in the console.
+
+## Use it
+
+1. **Settings → Strategy configuration:** enable one or more strategies and review their settings.
+2. **Start bot** (top right): it trades on paper. Watch the **Terminal**, **History** and **Logs** pages.
+3. **Backtest:** test strategies on history. Use **Recorded** data, which builds up while the bot runs (about 72 rounds per hour).
+4. **Live trading** stays locked until you connect a wallet, set `ALLOW_LIVE_TRADING=true` in `.env`, and your paper results pass the checks in Settings → Live trading. Read `docs/execution.md` first.
+
+The red **STOP** button halts everything immediately. The bot only runs while your PC is on and
+awake: set Windows/macOS sleep to *Never* while plugged in if you want it running unattended.
+
+## Everyday commands
+
+Run these from the `pm5bot` folder:
+
+| | Windows (PowerShell) | Mac / Linux |
+|---|---|---|
+| Update to the latest version | `powershell -ExecutionPolicy Bypass -File scripts\update.ps1` | `bash scripts/update.sh` |
+| Back up the database | `powershell -ExecutionPolicy Bypass -File scripts\backup.ps1` | `bash scripts/backup.sh` |
+| Stop (keeps all data) | `docker compose stop` | `docker compose stop` |
+| Start again | `docker compose start` | `docker compose start` |
+| See logs | `docker compose logs -f backend` | `docker compose logs -f backend` |
+
+Updating keeps your trades, settings and wallet (they live in Docker volumes and `.env`).
+**Don't delete `.env`:** the database password and wallet encryption key are in it.
+
+## If something's wrong
+
+- **Settings → Server status** shows the database, Redis and each live feed (Binance prices, Polymarket books, market discovery) with its last error.
+- **"Docker is not running":** start Docker Desktop and wait for it to say *running*.
+- **Port 8080 already in use:** change `"127.0.0.1:8080:8080"` in `docker-compose.yml` to, say, `"127.0.0.1:8090:8080"`, then open http://localhost:8090.
+- **Feeds show "down":** check your internet connection. A VPN or firewall must allow `data-stream.binance.vision`, `clob.polymarket.com` and `gamma-api.polymarket.com`. Polymarket is not available in every country.
+
+## Safety on your PC
+
+- Everything listens on **127.0.0.1 only**, so other devices on your network can't reach the console or the database.
+- The wallet key is encrypted with `MASTER_KEY` before it's stored. It's never shown again, never logged, and never sent anywhere except to sign orders with Polymarket's official SDK.
+- Use a **dedicated wallet** with only what you can afford to lose. If you ever pasted a key into another website, consider that wallet compromised.
+
+## Docs
+
+| | |
 |---|---|
-| 1. Reference investigation | ✅ `docs/reverse_engineering.md` |
-| 2. Architecture, DB, API core, Docker | ✅ `docs/architecture.md`, `docs/api_documentation.md` |
-| 3. Frontend | ✅ Terminal, Settings (wallet, strategies, risk, live gate), Logs, Signals · `docs/screenshots/` |
-| 4. Market infrastructure | ✅ Binance + Polymarket collectors, registry, books, features, `/ws/markets` |
-| 5. Strategy engines | ✅ Constellation, Custom BTC/ETH, Pocket Aces, Mean Reversion, AI Strat; signal scoring · `docs/strategies.md` |
-| 6. Execution | ✅ Risk engine, paper and live executors, positions, DCA/stop/TP, settlement, reconciliation · `docs/execution.md` |
-| 7. Backtesting | ✅ Public-history backfill, replay engine (same code as live), IS/OOS metrics, Backtest page · `docs/backtesting.md` |
-| 8. Production hardening | next |
+| `docs/strategies.md` | What each strategy does and its settings |
+| `docs/execution.md` | Orders, fees, risk limits, going live (checklist) |
+| `docs/backtesting.md` | Backtesting, data quality, and why backfilled data is biased |
+| `docs/architecture.md` | How it works inside |
+| `docs/api_documentation.md` | API reference |
+| `docs/reverse_engineering.md` | Notes on the reference app this was modelled on |
 
-`legacy_v0/` holds the first single-file bot. It already paper-trades end to end, and it's
-the reference for porting strategy logic in Phase 5.
+## For developers
 
-## Run it
+Backend: Python 3.12+, FastAPI, Postgres, Redis (`backend/`). Frontend: React + Vite (`frontend/`).
 
 ```bash
-cp .env.example .env      # then fill in MASTER_KEY, JWT_SECRET, ADMIN_PASSWORD, POSTGRES_PASSWORD
-docker compose up -d --build
+cd backend && python -m pytest
 ```
-
-Open http://127.0.0.1:8080 and sign in as `admin` with your `ADMIN_PASSWORD`. Both ports bind to
-localhost only. For remote access, use an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 you@server`)
-or a TLS reverse proxy. Never expose the console over plain HTTP, because the wallet key is
-entered there.
-
-Frontend dev: `cd frontend && npm install && npm run dev` (proxies `/api` to `:8000`).
-Tests: `npx vitest run` (unit) and `ADMIN_PASSWORD=… node e2e/smoke.cjs` (end-to-end).
-Live feed checks (hit real Binance and Polymarket): `cd backend && RUN_LIVE=1 ../.venv/bin/python -m pytest tests/live`.
-
-## Develop and test
-
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r backend/requirements-dev.txt
-# needs a local Postgres with database pm5_test, plus Redis on 6379
-cd backend && ../.venv/bin/python -m pytest
+cd frontend && npx vitest run
 ```
 
-## Wallet
-
-Connect it in the website (Settings → Wallet). The key goes only to your own backend, which
-encrypts it with `MASTER_KEY` and never returns or logs it. Use a dedicated trading wallet.
-Details are in `docs/architecture.md`.
+Live-feed checks: `RUN_LIVE=1 python -m pytest tests/live`.

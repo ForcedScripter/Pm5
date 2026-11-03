@@ -1,7 +1,13 @@
 name: pm5bot
 
+# rotate container logs so a PC left running for weeks doesn't fill its disk
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
 services:
   postgres:
+    logging: *logging
     image: public.ecr.aws/docker/library/postgres:16-alpine
     environment:
       POSTGRES_DB: pm5
@@ -15,6 +21,7 @@ services:
     restart: unless-stopped
 
   redis:
+    logging: *logging
     image: public.ecr.aws/docker/library/redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     volumes: [redisdata:/data]
@@ -25,6 +32,7 @@ services:
     restart: unless-stopped
 
   backend:
+    logging: *logging
     build: { context: ., dockerfile: infrastructure/docker/backend.Dockerfile }
     env_file: .env
     environment:
@@ -38,8 +46,10 @@ services:
     restart: unless-stopped
 
   frontend:
+    logging: *logging
     build: { context: ., dockerfile: infrastructure/docker/frontend.Dockerfile }
-    depends_on: [backend]
+    depends_on:
+      backend: { condition: service_healthy }
     # the console: open http://127.0.0.1:8080 (put a TLS proxy in front for remote access)
     ports: ["127.0.0.1:8080:8080"]
     restart: unless-stopped

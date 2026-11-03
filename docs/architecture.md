@@ -124,7 +124,16 @@ database. Use a dedicated trading wallet holding only what you're willing to tra
 2. The in-app switch (`POST /api/live-trading/enable`) only turns on when a wallet is connected, emergency stop is clear, and the **paper acceptance criteria** pass. Defaults: ≥3 days, ≥100 trades, profit factor ≥1.05. All are configurable.
 3. `POST /api/emergency-stop` turns everything off immediately. From Phase 6 it also cancels all open exchange orders.
 
-## Deployment
+## Deployment (your own PC)
+
+`scripts/setup.(sh|ps1)` writes `.env` with random secrets and runs `docker compose up -d --build`.
+Ports bind to `127.0.0.1` only. Containers restart automatically (`unless-stopped`), logs
+rotate (3 × 10 MB per container), and the backend runs DB migrations on every start.
+`scripts/update.*` does `git pull` and rebuilds; `scripts/backup.*` dumps Postgres to `./backups/`.
+Batch jobs (backfill, backtests, AI training) run in a separate worker process inside the
+backend container, so they never stall the live feeds.
+
+## Deployment (server, optional)
 
 `docker compose up -d --build` starts postgres, redis and the backend. The backend runs
 `alembic upgrade head` on start and binds to `127.0.0.1:8000` only. Put Caddy or nginx with

@@ -173,6 +173,13 @@ export default function Settings() {
           <ul className="space-y-1.5 p-5 text-[13px]">
             <li className="flex justify-between"><span>Database</span><span className={health.data?.db ? "text-up" : "text-down"}>{health.data?.db ? "ok" : "down"}</span></li>
             <li className="flex justify-between"><span>Redis</span><span className={health.data?.redis ? "text-up" : "text-down"}>{health.data?.redis ? "ok" : "down"}</span></li>
+            {Object.values(health.data?.feeds ?? {}).map((f) => (
+              <li key={f.name}>
+                <div className="flex justify-between"><span className="capitalize">{f.name === "clob" ? "Polymarket books" : f.name === "registry" ? "Market discovery" : f.name === "writer" ? "History writer" : "Binance prices"}</span>
+                  <span className={f.status === "live" ? "text-up" : f.status === "stale" || f.status === "connecting" ? "text-warn" : "text-down"}>{f.status}{f.reconnects ? ` · ${f.reconnects} reconnects` : ""}</span></div>
+                {f.status !== "live" && f.last_error && <div className="mt-0.5 text-[11px] break-words text-tx-low">{f.last_error}</div>}
+              </li>
+            ))}
             {health.data?.config_problems.map((p) => <li key={p} className="text-warn">⚠ {p}</li>)}
           </ul>
         </Panel>
