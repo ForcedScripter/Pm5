@@ -2,8 +2,14 @@
 taker fees, cost less than the $1 the pair is certain to pay.
 
 One of the two tokens always settles at $1, so a pair bought for under $1 all-in is a locked profit
-whatever the price does. The catch is that it is rare and brief: in this bot's own recorded books
-(1,321 rounds, Nov 3–11 2026) it showed up in 9 rounds, about 1.5¢ a pair, and faster bots take it.
+whatever the price does.
+
+IMPORTANT, found 2026-11-12: Polymarket's Up and Down books are ONE book shown from both sides (the
+Down ask is always $1 minus the Up bid; true in 139,267 of 139,278 recorded snapshots). So both asks
+can only sum to under $1 when a book is crossed, i.e. our copy is momentarily stale. Every "gap" in
+the recorded data (33 snapshots) was such a moment, never a real one. This engine therefore refuses
+any book that is crossed or not a mirror of the other side, which in practice means it does not
+trade. It is kept as a monitor (the counters show how often stale gaps appear), off by default.
 
 Scans every current market four times a second. An opportunity must still be there `persist_ms`
 after it was first seen before the paper fill is booked, because a real order takes that long to
@@ -60,6 +66,16 @@ class PairPlan:
 def pair_cost(up: float, down: float, fee_rate: float) -> float:
     """All-in cost of one Up + one Down bought at these prices as a taker."""
     return up + down + taker_fee(1.0, up, fee_rate) + taker_fee(1.0, down, fee_rate)
+
+
+def consistent(up_bid, up_ask, down_bid, down_ask, tick: float = 0.01) -> bool:
+    """True when the two books are a sane mirror of each other: neither crossed, and each side's ask
+    equal to $1 minus the other side's bid (to within a tick). Anything else is a stale local copy."""
+    if None in (up_bid, up_ask, down_bid, down_ask):
+        return False
+    if up_bid >= up_ask or down_bid >= down_ask:
+        return False
+    return abs(up_ask + down_bid - 1) <= tick + 1e-9 and abs(down_ask + up_bid - 1) <= tick + 1e-9
 
 
 def plan_pair(up_asks: dict[float, float], down_asks: dict[float, float], fee_rate: float, *, min_profit: float,
@@ -183,6 +199,10 @@ class ArbEngine:
             self._first_seen.pop(m.id, None)
             return
         self.status["scans"] += 1
+        if not consistent(ub.best_bid, ub.best_ask, db_.best_bid, db_.best_ask, float(m.tick_size)):
+            self.status["stale_books"] = self.status.get("stale_books", 0) + 1     # a crossed / half-updated copy, not a real gap
+            self._first_seen.pop(m.id, None)
+            return
         fee_rate = float(m.fee_rate)
         top = pair_cost(ub.best_ask, db_.best_ask, fee_rate)
         if self.status["best_cost"] is None or top < self.status["best_cost"]:

@@ -12,8 +12,9 @@ from app.models import ArbPair, User
 
 router = APIRouter(prefix="/api/arb")
 Mode = Query("paper", pattern="^(paper|live)$")
-NOTE = ("Paper only. A pair is booked only if the gap is still in the real order book after the persist delay. Real orders "
-        "can fill one side and miss the other; that risk is not in these numbers.")
+NOTE = ("Monitor only. Up and Down are one order book shown from both sides, so a pair costs at least $1 whenever the books "
+        "are consistent. Gaps appear only when the bot's copy is stale, and those are refused. Real orders could also fill "
+        "one side and miss the other.")
 
 
 @router.get("/pairs")
@@ -36,4 +37,4 @@ async def stats(mode: str = Mode, user: User = Depends(current_user), db: AsyncS
             "pnl": round(sum(float(r.pnl or 0) for r in rows), 4),
             "locked_open": round(sum(float(r.locked_pnl) for r in rows if r.status == "open"), 4),
             "staked": round(sum(float(r.cost) + float(r.fees) for r in rows), 2),
-            "engine": {k: eng.status.get(k) for k in ("scans", "opportunities", "missed", "pairs", "best_cost", "last_block")} if eng else None}
+            "engine": {k: eng.status.get(k) for k in ("scans", "opportunities", "missed", "pairs", "best_cost", "last_block", "stale_books")} if eng else None}

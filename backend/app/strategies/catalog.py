@@ -264,8 +264,9 @@ class CryptoStrikesParams(BaseModel):
 
 class PairArbParams(BaseModel):
     """Pair Arbitrage (PAPER ONLY): buy Up and Down in the same round when both asks plus both taker
-    fees cost less than the $1 the pair must pay. Risk-free on paper, rare in practice (9 of 1,321
-    recorded rounds), and exposed to one-leg fills if it were ever run live."""
+    fees cost less than the $1 the pair must pay. In practice it cannot trade: Up and Down are one
+    mirrored book, so the asks only sum to under $1 when our copy of a book is stale, and the engine
+    refuses those. Kept as a monitor of stale-book moments."""
     assets: list[Asset] = list(ALL_ASSETS)
     min_profit: float = Field(0.005, ge=0.0, le=0.20)         # locked profit per pair, after both fees
     max_pair_usd: float = Field(10.0, ge=1.0, le=1000.0)      # all-in cost of one purchase (both legs + fees)
@@ -356,7 +357,7 @@ CATALOG: dict[str, tuple[str, str, type[BaseModel]]] = {
                     SporkMakerParams),
     "crypto_strikes": ("Crypto Strikes", "Paper: BTC/ETH \"above $X at noon\" and \"reach / dip to $X\" markets, priced from Binance "
                        "spot and volatility; resting bids only.", CryptoStrikesParams),
-    "pair_arb": ("Pair Arbitrage", "Paper: buy Up and Down together when both asks plus fees cost under $1, locking the difference.",
+    "pair_arb": ("Pair Arbitrage", "Monitor only: Up + Down for under $1 never really occurs (the two books are one book mirrored).",
                  PairArbParams),
     "custom_btc": ("Custom BTC", "Your own directional rules for the BTC 5-minute market.", CustomParams),
 }

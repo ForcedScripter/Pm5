@@ -243,7 +243,7 @@ export function StrategyEditor({ strategy }: { strategy: Strategy }) {
       {arb && (
         <>
           <p className="rounded-md border border-amber/30 bg-amber/5 px-3 py-2 text-[12px] leading-relaxed text-tx">
-            Paper only. Buys Up and Down in the same round when both asks plus both fees cost under $1, which locks the difference whoever wins. It is rare: in this bot's recorded books it appeared in 9 of 1,321 rounds, about 1.5¢ a pair. Live trading is refused because one side can fill without the other.
+            Monitor only. Up and Down are one order book shown from both sides, so both asks can only cost under $1 when the bot's copy of a book is momentarily stale. The engine refuses those moments, which means it does not trade; the History panel counts how often they occur.
           </p>
           <FieldGroup title="Pair arbitrage"><div className="space-y-2.5">{ARB_FIELDS.map(field)}</div></FieldGroup>
           <FieldGroup title="Markets">

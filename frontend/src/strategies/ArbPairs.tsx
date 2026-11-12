@@ -33,7 +33,7 @@ export function ArbPairs({ mode }: { mode: string }) {
           </div>
         </div>
       )}
-      {rows.length === 0 ? <Empty>{pairs.isLoading ? "Loading…" : "No pairs yet. Enable Pair Arbitrage in Settings; expect it to trigger in well under 1% of rounds."}</Empty> : (
+      {rows.length === 0 ? <Empty>{pairs.isLoading ? "Loading…" : "No pairs, as expected: Up and Down are one mirrored book, so a real gap under $1 does not occur."}</Empty> : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-[12.5px]">
             <thead><tr className="border-b border-line text-left font-num text-[10.5px] tracking-wider text-tx-low uppercase">

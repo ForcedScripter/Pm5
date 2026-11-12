@@ -71,7 +71,17 @@ def _book(token, bid, ask):
     return ob
 
 
-async def test_engine_buys_a_pair_only_after_the_gap_persists_then_settles(client, auth):
+def test_only_a_stale_copy_of_the_book_can_show_a_gap():
+    from app.strategies.arb.engine import consistent
+    assert consistent(0.49, 0.50, 0.50, 0.51)                       # a real book: Down ask = 1 − Up bid
+    assert not consistent(0.29, 0.231, 0.70, 0.71)                  # the 2026-11-12 "arbitrage": the Up book was crossed
+    assert not consistent(0.45, 0.46, 0.46, 0.47)                   # asks sum to 0.93 but the sides don't mirror: stale
+    assert not consistent(None, 0.5, 0.5, 0.51)
+    for up_bid, up_ask in ((0.10, 0.12), (0.49, 0.50), (0.93, 0.97)):   # any consistent book costs at least $1 a pair before fees
+        assert up_ask + (1 - up_bid) >= 1
+
+
+async def test_engine_refuses_a_gap_that_comes_from_a_stale_book(client, auth):
     ws = (int(time.time()) // 300) * 300
     now = ws + 60.0
     md = type("MD", (), {})()
@@ -94,46 +104,25 @@ async def test_engine_buys_a_pair_only_after_the_gap_persists_then_settles(clien
     md.registry.current["btc"] = MarketInfo(mid, "btc", f"btc-arb-{ws}", "q", ws, ws + 300, "0x", up, dn, 0.01, 5)
     eng = ArbEngine(md, Hub(), _Orders())
 
-    def books(u, d, at):
-        md.books.b = {up: _book(up, round(u - 0.01, 2), u), dn: _book(dn, round(d - 0.01, 2), d)}
+    def books(ub, ua, db_, da, at):
+        md.books.b = {up: _book(up, ub, ua), dn: _book(dn, db_, da)}
         for ob in md.books.b.values():
             ob.updated = at
 
     try:
-        books(0.50, 0.51, now)
+        books(0.49, 0.50, 0.50, 0.51, now)                   # a normal book: a pair costs $1.01 + fees
         await eng.tick(now)
-        assert eng.status["opportunities"] == 0 and eng.status["best_cost"] == pytest.approx(1.045, abs=1e-3)
-        books(0.46, 0.47, now)                               # 0.93 + 3.5¢ of fees: a 3.5¢ gap
-        await eng.tick(now)
-        assert eng.status["opportunities"] == 1 and eng.status["pairs"] == 0        # seen, but not yet old enough to trust
-        books(0.50, 0.51, now + 0.1)
-        await eng.tick(now + 0.1)
-        assert eng.status["missed"] == 1 and eng.status["pairs"] == 0               # gone within 100 ms: counted as missed
-        books(0.46, 0.47, now + 0.2)
-        await eng.tick(now + 0.2)
-        await eng.tick(now + 0.6)                                                   # still there 400 ms later → booked
-        assert eng.status["pairs"] == 1
-        async with SessionLocal() as db:
-            (row,) = (await db.execute(select(ArbPair).where(ArbPair.market_id == mid))).scalars().all()
-            assert float(row.shares) == 10.36 and float(row.locked_pnl) == pytest.approx(10.36 - float(row.cost) - float(row.fees), abs=1e-5)
-            assert float(row.locked_pnl) > 0.3 and row.status == "open" and row.diag["persisted_ms"] == 400
-            _, summary = await pf.state(db, uid, "paper")
-            assert summary["arb_open_pairs"] == 1
-            await db.execute(update(Market).where(Market.id == mid).values(winner="DOWN", closed=True))
-            await db.commit()
-        for t in (0.9, 1.2, 1.5, 1.8):                                              # same gap: up to the per-round cap, then no more
+        assert eng.status["scans"] == 1 and eng.status["opportunities"] == 0 and eng.status["best_cost"] > 1.03
+        books(0.45, 0.46, 0.46, 0.47, now + 0.3)             # asks sum to 0.93, but only because one side is stale
+        for t in (0.3, 0.6, 0.9, 1.2):
             await eng.tick(now + t)
-        assert eng.status["pairs"] == 3                                             # 3 × $10 = the $30 round cap
-        await eng.settle(now + 400)
+        assert eng.status["stale_books"] == 4 and eng.status["opportunities"] == 0 and eng.status["pairs"] == 0
         async with SessionLocal() as db:
-            rows = (await db.execute(select(ArbPair).where(ArbPair.market_id == mid))).scalars().all()
-            assert {r.status for r in rows} == {"settled"} and all(float(r.pnl) == float(r.locked_pnl) for r in rows)
+            assert (await db.execute(select(ArbPair).where(ArbPair.market_id == mid))).first() is None
+            _, summary = await pf.state(db, uid, "paper")
+            assert summary["arb_open_pairs"] == 0
         st = (await client.get("/api/arb/stats", headers=auth)).json()
-        assert st["pairs"] == 3 and st["pnl"] > 0.9 and "one side" in st["note"]
-        assert len((await client.get("/api/arb/pairs", headers=auth)).json()) == 3
-        sb = (await client.get("/api/scoreboard", headers=auth)).json()
-        row = next(s for s in sb["strategies"] if s["strategy"] == "pair_arb")
-        assert row["n"] == 3 and row["unit"] == "pair" and row["win_rate"] == 1.0 and row["verdict"] == "not enough data"
+        assert st["pairs"] == 0 and "one side" in st["note"]
         bt = await client.post("/api/backtests", headers=auth, json={"name": "x", "strategies": ["pair_arb"], "days": 1})
         assert bt.status_code == 422 and "can't be backtested" in bt.text
     finally:
