@@ -478,7 +478,7 @@ class StrikeEngine:
                 continue
             if total + cost > p["max_total_usd"] + 1e-9 or by_event.get(m.event_slug, 0.0) + cost > p["max_event_usd"] + 1e-9:
                 continue
-            r = check(us.risk, st, OrderIntent(purpose="entry", market_id=str(m.id), side=side, amount_usd=cost, ask=price, bid=bid,
+            r = check(us.risk, st, OrderIntent(category="strikes", purpose="entry", market_id=str(m.id), side=side, amount_usd=cost, ask=price, bid=bid,
                                                limit_price=price, secs_left=m.expiry - now, spread=None, ask_depth=float("inf"),
                                                fee_rate=0.0), now=now, emergency_stopped=us.emergency_stopped)
             if not r.ok:

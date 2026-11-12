@@ -136,6 +136,7 @@ class CustomParams(Common):
 
 class PocketAcesParams(Common):
     """[ref] High-certainty sniper preset with Fair-Value and Peak-Gap gating."""
+    assets: list[Asset] = list(ALL_ASSETS)        # all six coins: same rule, six times the evidence
     entry_low: float = 0.60
     entry_high: float = 0.75
     exits: Exits = Exits(stop_loss=0.35)
@@ -292,7 +293,8 @@ class BinanceLeadParams(Common):
     assets: list[Asset] = list(ALL_ASSETS)
     lead_threshold_bps: float = Field(12.0, ge=3.0, le=30.0)     # bps; under ~5-12 bps Binance and Chainlink
                                                                   # (the settlement source) can disagree (npcnpc09)
-    confirm_seconds: float = Field(10.0, ge=1.0, le=30.0)         # Must hold lead for N seconds to reject spikes
+    confirm_seconds: float = Field(3.0, ge=1.0, le=30.0)          # lead must hold this long. Was 10s: in the replay a 10s
+                                                                  # wait was the worst variant at every threshold
     max_entry_price: float = Field(0.72, ge=0.50, le=0.85)       # Hard cap: only buy while ask is still cheap
     min_entry_price: float = Field(0.40, ge=0.20, le=0.65)       # Avoid near-dead tokens
     max_offset_seconds: int = Field(180, ge=30, le=270)          # Only catch early moves in first 180s

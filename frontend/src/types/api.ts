@@ -109,6 +109,10 @@ export interface RiskSettings {
   max_open_positions: number;
   max_trades_per_market: number;
   max_drawdown_pct: number;
+  paper_max_drawdown_pct: number;
+  max_five_min_exposure_usd: number;
+  max_strikes_exposure_usd: number;
+  max_arb_exposure_usd: number;
   min_liquidity_usd: number;
   max_spread: number;
   max_slippage: number;

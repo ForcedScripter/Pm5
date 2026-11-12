@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     market_data_enabled: bool = True
     # Weather data collection (read only, no orders): METAR reports, ensemble forecasts and price ladders
     weather_enabled: bool = True
+    log_retention_days: int = 30
+    weather_retention_days: int = 120
+    # Alerts are always written to the activity log. Set this to a Slack or Discord incoming-webhook URL
+    # to also get them on your phone. Only the alert text is sent.
+    alert_webhook_url: str = ""
     weather_cities: str = "london,nyc,hong-kong,munich,madrid,paris,chicago,tokyo"
     price_history_retention_days: int = 30
     snapshot_retention_days: int = 90

@@ -79,6 +79,13 @@ class RiskSettings(BaseModel):
     max_open_positions: int = Field(6, ge=1, le=50)
     max_trades_per_market: int = Field(1, ge=1, le=5)
     max_drawdown_pct: float = Field(25, gt=0, le=100)
+    # Paper has its own, looser drawdown limit: stopping a paper experiment at 25% starves the scoreboard
+    # of the trades it needs, and no real money is at stake.
+    paper_max_drawdown_pct: float = Field(50, gt=0, le=100)
+    # Open cost allowed per category, so one bad model can't use the whole bankroll. 0 = no cap.
+    max_five_min_exposure_usd: float = Field(80, ge=0)      # 5-minute positions + maker rounds
+    max_strikes_exposure_usd: float = Field(60, ge=0)
+    max_arb_exposure_usd: float = Field(40, ge=0)
     min_liquidity_usd: float = Field(20, ge=0)
     max_spread: float = Field(0.04, gt=0, lt=1)
     max_slippage: float = Field(0.02, ge=0, lt=0.5)

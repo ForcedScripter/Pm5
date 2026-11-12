@@ -77,6 +77,9 @@ class MarketDataService:
             from app.external.weather import WeatherCollector
             self.weather = WeatherCollector(self.hub)                  # data only: places no orders
             self.tasks.append(asyncio.create_task(self.weather.run()))
+        from app.monitoring.alerts import AlertWatch
+        self.alerts = AlertWatch(self, self.hub)
+        self.tasks.append(asyncio.create_task(self.alerts.run()))
         for coro in (self.binance.run(), self.registry.run(), self.books.run(), self._broadcast(), self._renew(),
                      self._retention(), self._loop_lag()):
             self.tasks.append(asyncio.create_task(coro))
@@ -84,7 +87,7 @@ class MarketDataService:
     async def stop(self) -> None:
         for svc in (self.binance, self.registry, self.books, getattr(self, "runner", None), getattr(self, "orders", None),
                     getattr(self, "scalper", None), getattr(self, "maker", None), getattr(self, "strikes", None),
-                    getattr(self, "weather", None), getattr(self, "arb", None)):
+                    getattr(self, "weather", None), getattr(self, "arb", None), getattr(self, "alerts", None)):
             if svc:
                 svc.stop()
         for t in self.tasks:
@@ -142,6 +145,12 @@ class MarketDataService:
                                      {"d": s.price_history_retention_days})
                     await db.execute(text("delete from market_snapshots where ts < now() - make_interval(days => :d)"),
                                      {"d": s.snapshot_retention_days})
+                    await db.execute(text("delete from execution_logs where ts < now() - make_interval(days => :d)"),
+                                     {"d": s.log_retention_days})
+                    await db.execute(text("delete from weather_samples where ts < now() - make_interval(days => :d)"),
+                                     {"d": s.weather_retention_days})
+                    await db.execute(text("delete from weather_metars where obs_time < now() - make_interval(days => :d)"),
+                                     {"d": s.weather_retention_days})
                     await db.commit()
             except Exception as e:  # noqa: BLE001
                 log.error("retention job failed: %s", e)

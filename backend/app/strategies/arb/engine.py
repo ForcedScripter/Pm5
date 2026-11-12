@@ -220,7 +220,7 @@ class ArbEngine:
                 return
             st, _ = await pf.state(db, uid, mode, self.orders._marks())
             avg = (plan.up_cost + plan.down_cost) / plan.shares / 2
-            r = check(us.risk, st, OrderIntent(purpose="entry", market_id=f"arb:{m.id}", side="UP", amount_usd=plan.cost, ask=avg, bid=None,
+            r = check(us.risk, st, OrderIntent(category="arb", purpose="entry", market_id=f"arb:{m.id}", side="UP", amount_usd=plan.cost, ask=avg, bid=None,
                                                limit_price=avg, secs_left=m.end - now, spread=None, ask_depth=float("inf"), fee_rate=0.0,
                                                min_secs_before_close=p["min_seconds_left"]),
                       now=now, emergency_stopped=us.emergency_stopped)

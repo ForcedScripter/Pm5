@@ -28,6 +28,8 @@ class PortfolioState:
     consecutive_losses: int
     last_loss_at: float | None
     entries_by_market: dict[str, int] = field(default_factory=dict)
+    mode: str = "live"                       # paper uses its own drawdown limit
+    exposure_by_category: dict[str, float] = field(default_factory=dict)   # five_min | strikes | arb → $ open cost
 
 
 @dataclass
@@ -50,6 +52,7 @@ class OrderIntent:
     # A strategy built for the final minute (TWAP-lock) may lower the user's "min seconds before
     # resolution" for its own entries. Never below MIN_SECS_FLOOR, and it can only lower, not raise.
     min_secs_before_close: float | None = None
+    category: str = "five_min"               # which per-category exposure cap applies
 
 
 MIN_SECS_FLOOR = 5.0
@@ -110,8 +113,14 @@ def check(risk: dict, st: PortfolioState, oi: OrderIntent, *, now: float, emerge
                       f"> ${risk['max_daily_exposure_usd']:.2f}")
     if st.peak_equity > 0:
         dd = (st.peak_equity - st.equity) / st.peak_equity * 100
-        if dd >= risk["max_drawdown_pct"] - 1e-9:
-            return _block("max_drawdown", f"drawdown {dd:.1f}% ≥ {risk['max_drawdown_pct']:.0f}%", drawdown_pct=dd)
+        limit = risk.get("paper_max_drawdown_pct", risk["max_drawdown_pct"]) if st.mode == "paper" else risk["max_drawdown_pct"]
+        if dd >= limit - 1e-9:
+            return _block("max_drawdown", f"drawdown {dd:.1f}% ≥ {limit:.0f}%", drawdown_pct=dd)
+    cap = risk.get(f"max_{oi.category}_exposure_usd") or 0
+    have = st.exposure_by_category.get(oi.category, 0.0)
+    if cap and have + oi.amount_usd > cap + 1e-9:
+        return _block("category_cap", f"{oi.category.replace('_', ' ')} exposure would be ${have + oi.amount_usd:.2f} "
+                      f"> cap ${cap:.2f}", category=oi.category, exposure=have)
     n, cd = risk["consecutive_losses_for_cooldown"], risk["loss_cooldown_s"]
     if cd and st.consecutive_losses >= n and st.last_loss_at and now - st.last_loss_at < cd:
         return _block("loss_cooldown", f"{st.consecutive_losses} losses in a row: cooling down "

@@ -130,7 +130,8 @@ async def state(db: AsyncSession, user_id: uuid.UUID, mode: str, marks: dict[str
         where user_id = :u and mode = :m group by 1"""), {"u": user_id, "m": mode})).all())
     st = PortfolioState(cash=cash, open_positions=len(opens), open_exposure=open_cost, today_realized=today_realized,
                         today_bought=today_bought, equity=equity, peak_equity=peak, consecutive_losses=streak,
-                        last_loss_at=last_loss, entries_by_market=entries)
+                        last_loss_at=last_loss, entries_by_market=entries, mode=mode,
+                        exposure_by_category={"five_min": open_cost - sk["cost"] - ab["cost"], "strikes": sk["cost"], "arb": ab["cost"]})
     summary = {"mode": mode, "cash": round(cash, 4), "positions_value": round(value, 4), "equity": round(equity, 4),
                "invested": round(open_cost, 4), "realized_pnl": round(realized, 4), "unrealized_pnl": round(value - open_cost, 4),
                "today_realized": round(today_realized, 4), "trades": closed[1], "wins": closed[2],

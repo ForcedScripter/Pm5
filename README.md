@@ -88,3 +88,14 @@ cd ..\frontend; npx vitest run; npx tsc -b
 - After your first login you can delete the `ADMIN_PASSWORD` line from `.env`; it is only read when the account is first created.
 - New local installs give the Postgres database a random password (stored in `%LOCALAPPDATA%\pm5bot\pg.password`). An install made before this change still uses no password; to switch, back up, delete `%LOCALAPPDATA%\pm5bot\pgdata`, and run `setup-local.ps1` again.
 - Use a **dedicated wallet** with only what you can afford to lose. If you ever pasted a key into another website, consider that wallet compromised.
+
+## Keep it running, and get alerts
+
+- **Start at login (Windows):** `powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1` puts a launcher in your
+  Startup folder that runs `scripts\start-local.ps1` hidden. Undo with `scripts\uninstall-autostart.ps1`. The scoreboard and the
+  weather / strikes logs only build while the server runs.
+- **Alerts:** a feed down for 3 minutes, a portfolio-wide risk stop (daily loss, drawdown, emergency stop, category cap) and a
+  settlement mismatch are written to the activity log as `ALERT`. Set `ALERT_WEBHOOK_URL` in `.env` to a Slack or Discord
+  incoming-webhook URL to also receive them there.
+- **Risk settings added:** a separate drawdown limit for paper (default 50%) and open-cost caps per category
+  (5-minute markets, crypto strikes, pair arbitrage).
