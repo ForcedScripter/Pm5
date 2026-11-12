@@ -17,7 +17,11 @@ async def current_user(authorization: str = Header(default=""), db: AsyncSession
     uid = read_token(token) if token else None
     if not uid:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not authenticated")
-    user = await db.get(User, uuid.UUID(uid))
+    try:
+        key = uuid.UUID(uid)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not authenticated") from None
+    user = await db.get(User, key)
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not authenticated")
     return user

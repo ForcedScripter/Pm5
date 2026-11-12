@@ -17,7 +17,7 @@ export interface WalletOut {
   api_creds_ok: boolean;
 }
 
-export type StrategyKey = "constellation" | "ai_strat" | "mean_reversion" | "custom_btc" | "custom_eth" | "pocket_aces" | "odds_scalper";
+export type StrategyKey = "binance_lead" | "twap_lock" | "constellation" | "odds_scalper" | "pocket_aces" | "spork_maker" | "crypto_strikes" | "pair_arb" | "custom_btc";
 
 export interface Strategy {
   key: StrategyKey;
@@ -27,6 +27,78 @@ export interface Strategy {
   version: number;
   params: Record<string, unknown>;
   defaults: Record<string, unknown>;
+  edge_decay?: { paused: boolean; mean_pnl: number | null; n: number; window: number } | null;
+}
+
+export type ScoreVerdict = "passing" | "losing" | "inconclusive" | "not enough data";
+
+export interface ScoreBand {
+  band: string; n: number; win_rate: number | null; pnl: number; pnl_per_trade: number | null;
+  ci_low: number | null; ci_high: number | null; verdict: ScoreVerdict;
+}
+
+export interface ScoreRow extends Omit<ScoreBand, "band"> {
+  strategy: string; name: string; unit: "trade" | "round"; wins: number; need: number;
+  breakeven_win_rate: number | null; avg_entry: number | null; max_day_share: number | null; bands: ScoreBand[];
+  strict?: Omit<ScoreBand, "band" | "win_rate">;
+}
+
+export interface Scoreboard {
+  mode: string; strategies: ScoreRow[];
+  calibration: { bucket: string; n: number; mean_fair: number; win_rate: number }[];
+  rule: { min_trades: number; min_rounds: number; min_for_verdict: number; max_day_share: number };
+}
+
+export interface ArbPairRow {
+  id: string; asset: string; status: string; shares: number; up_price: number; down_price: number; cost: number; fees: number;
+  locked_pnl: number; pnl: number | null; secs_in: number | null; opened_at: string; settled_at: string | null;
+}
+export interface ArbStats {
+  mode: string; note: string; pairs: number; open: number; pnl: number; locked_open: number; staked: number;
+  engine: { scans: number; opportunities: number; missed: number; pairs: number; best_cost: number | null; last_block: string | null } | null;
+}
+export interface WeatherSummary {
+  status: Record<string, unknown> | null; metars: number; note: string;
+  cities: { city: string; station: string; days: number; resolved: number; checked: number; agree: number;
+            forecast_bias_c: number | null; forecast_mae_c: number | null }[];
+  events: { slug: string; city: string; station: string; date: string; unit: string; samples: number; running_max_c: number | null;
+            running_whole: number | null; forecast_mean_c: number | null; forecast_min_c: number | null; forecast_max_c: number | null;
+            market_favourite: string | null; market_favourite_price: number | null; winner: string | null; own_label: string | null;
+            own_max_c: number | null }[];
+}
+export interface StrikeMarketRow {
+  id: string; slug: string; event: string; asset: string; kind: "above" | "reach" | "dip"; strike: number; expiry: number;
+  model: number | null; vol: number | null; bid: number | null; ask: number | null; book_age_s: number | null;
+  resting: Record<string, { price: number; shares: number }>;
+}
+export interface StrikeEngineStatus {
+  markets: number; books: number; quotes: number; fills: number; errors: number; last_error: string | null;
+  last_poll: number | null; last_discover: number | null;
+}
+export interface StrikePositionRow {
+  id: string; slug: string; asset: string; kind: string; strike: number; expiry: string; side: "YES" | "NO"; status: string;
+  shares: number; entry_price: number; cost: number; model_prob: number; mark: number | null; exit_price: number | null;
+  fees: number; pnl: number | null; opened_at: string; closed_at: string | null; winner: string | null;
+}
+export interface StrikeStats {
+  mode: string; disclaimer: string;
+  calibration: { kind: string; horizon: string; n: number; model_brier: number | null; market_brier: number | null }[];
+  settlement: { checked: number; agree: number; disagree: number };
+  positions: { open: number; open_cost: number; closed: number; wins: number; pnl: number };
+}
+export interface MakerRound {
+  id: string; asset: string; status: string; mode: string; sets: number; sold_up: number; sold_down: number;
+  proceeds: number; merged_sets: number | null; residual_side: "UP" | "DOWN" | null; residual_shares: number | null;
+  redeem_value: number | null; pnl: number | null; rebate_est: number; edge: number; fills: number;
+  one_sided: boolean | null; winner: "UP" | "DOWN" | null; markout_5s: number | null; markout_30s: number | null;
+  pnl_strict: number | null; reward_s: number | null; reward_sized: boolean;
+  window_end: string; settled_at: string | null;
+}
+
+export interface MakerStat {
+  asset: string; rounds: number; pnl: number; pnl_per_round: number | null; win_rounds: number;
+  one_sided_share: number | null; paired_shares: number; fills: number; markout_5s: number | null;
+  markout_30s: number | null; rebate_est: number; pnl_strict: number | null; strict_rounds: number; reward_s: number;
 }
 
 export interface RiskSettings {

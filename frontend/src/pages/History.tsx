@@ -1,30 +1,55 @@
-import { useQuery } from "@tanstack/react-query";
-import { History as HistoryIcon, ListOrdered } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { History as HistoryIcon, ListOrdered, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useMemo, useState } from "react";
 import { Empty, Panel, PanelHeader, Stat } from "@/components/ui/panel";
 import { usePortfolioStream } from "@/hooks/usePortfolioStream";
 import { ASSETS, cn, fmtCents, fmtUsd, tone } from "@/lib/utils";
 import { Api } from "@/services/api";
+import { ArbPairs } from "@/strategies/ArbPairs";
+import { MakerRounds } from "@/strategies/MakerRounds";
+import { PaperScoreboard } from "@/strategies/PaperScoreboard";
+import { StrikesPanel } from "@/strategies/StrikesPanel";
+import { WeatherPanel } from "@/strategies/WeatherPanel";
 
-const STRATS = ["constellation", "ai_strat", "mean_reversion", "custom_btc", "custom_eth", "pocket_aces", "odds_scalper"];
+const STRATS = ["binance_lead", "twap_lock", "constellation", "odds_scalper", "pocket_aces", "custom_btc"];
 const sel = "h-9 rounded-full border border-line-mid bg-bg-0/70 px-3 text-[12px] text-tx-hi focus:border-amber/70 focus:outline-none";
 const dur = (s: number) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${(s / 3600).toFixed(1)}h`);
 
 export default function History() {
   usePortfolioStream();
+  const qc = useQueryClient();
+  const [confirmReset, setConfirmReset] = useState(false);
+  const resetBook = useMutation({
+    mutationFn: () => Api.resetBook(),
+    onSuccess: () => {
+      setConfirmReset(false);
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
+      qc.invalidateQueries({ queryKey: ["positions"] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["trades"] });
+      qc.invalidateQueries({ queryKey: ["logs"] });
+    },
+  });
   const pf = useQuery({ queryKey: ["portfolio"], queryFn: () => Api.portfolio() });
   const [mode, setMode] = useState<"paper" | "live" | "">("");
   const m = mode || pf.data?.mode || "paper";
   const [f, setF] = useState({ asset: "", strategy: "", result: "", from: "", to: "" });
-  const trades = useQuery({ queryKey: ["trades", m, f], queryFn: () => Api.trades({ mode: m, ...f,
-    from: f.from ? new Date(f.from).toISOString() : "", to: f.to ? new Date(f.to + "T23:59:59").toISOString() : "" }), refetchInterval: 15_000 });
+  const trades = useQuery({
+    queryKey: ["trades", m, f], queryFn: () => Api.trades({
+      mode: m, ...f,
+      from: f.from ? new Date(f.from).toISOString() : "", to: f.to ? new Date(f.to + "T23:59:59").toISOString() : ""
+    }), refetchInterval: 15_000
+  });
   const orders = useQuery({ queryKey: ["orders", m], queryFn: () => Api.orders(m), refetchInterval: 10_000 });
   const t = trades.data ?? [];
   const sum = useMemo(() => {
     const wins = t.filter((x) => x.pnl > 0), losses = t.filter((x) => x.pnl < 0);
     const gw = wins.reduce((a, x) => a + x.pnl, 0), gl = -losses.reduce((a, x) => a + x.pnl, 0);
-    return { n: t.length, pnl: t.reduce((a, x) => a + x.pnl, 0), fees: t.reduce((a, x) => a + x.fees, 0),
-             hit: t.length ? wins.length / t.length : null, pf: gl ? gw / gl : null };
+    return {
+      n: t.length, pnl: t.reduce((a, x) => a + x.pnl, 0), fees: t.reduce((a, x) => a + x.fees, 0),
+      hit: t.length ? wins.length / t.length : null, pf: gl ? gw / gl : null
+    };
   }, [t]);
   return (
     <div className="space-y-5">
@@ -36,7 +61,28 @@ export default function History() {
         <Stat label="Fees paid" value={fmtUsd(sum.fees)} sub="Polymarket taker fees" accent="#ff5a76" />
       </div>
       <Panel>
-        <PanelHeader icon={<HistoryIcon />} title="Trade history" />
+        <PanelHeader
+          icon={<HistoryIcon />}
+          title="Trade history"
+          right={m === "paper" ? (
+            confirmReset ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-tx-mid">{resetBook.error ? <span className="text-down">{resetBook.error.message}</span> : "Reset book?"}</span>
+                <Button size="sm" variant="danger" className="h-7 px-2.5 text-xs" loading={resetBook.isPending} onClick={() => resetBook.mutate()}>
+                  Confirm
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setConfirmReset(false)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs hover:border-down/60 hover:text-down" onClick={() => setConfirmReset(true)}>
+                <RotateCcw className="mr-1 h-3 w-3" />
+                Reset paper book
+              </Button>
+            )
+          ) : undefined}
+        />
         <div className="flex flex-wrap gap-2 border-b border-line px-4 py-3">
           <select aria-label="mode" className={sel} value={m} onChange={(e) => setMode(e.target.value as "paper" | "live")}><option value="paper">Paper</option><option value="live">Live</option></select>
           <select aria-label="asset" className={sel} value={f.asset} onChange={(e) => setF({ ...f, asset: e.target.value })}><option value="">All assets</option>{ASSETS.map((a) => <option key={a} value={a}>{a.toUpperCase()}</option>)}</select>
@@ -68,6 +114,11 @@ export default function History() {
           </div>
         )}
       </Panel>
+      <PaperScoreboard mode={m} />
+      <MakerRounds mode={m} />
+      <ArbPairs mode={m} />
+      <StrikesPanel mode={m} />
+      <WeatherPanel />
       <Panel>
         <PanelHeader icon={<ListOrdered />} title="Order log" />
         {!orders.data?.length ? <Empty>No orders yet.</Empty> : (

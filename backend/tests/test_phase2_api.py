@@ -60,7 +60,7 @@ async def test_enable_disable(client, auth):
 
 
 def test_custom_asset_is_pinned():
-    assert validate_params("custom_eth", {"assets": ["btc", "sol"]})["assets"] == ["eth"]
+    assert validate_params("custom_btc", {"assets": ["eth", "sol"]})["assets"] == ["btc"]
 
 
 def test_dca_stage_sum_must_fit_ceiling():

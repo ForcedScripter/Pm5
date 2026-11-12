@@ -12,6 +12,9 @@ import datetime as dt
 from dataclasses import dataclass, field
 from typing import Literal
 
+from app.execution.fees import taker_fee
+from app.strategies.fair_value import annual_vol, compute_fair_probability, strike_of
+
 Side = Literal["UP", "DOWN"]
 
 
@@ -137,19 +140,40 @@ def gate_price(p: dict, price: float) -> tuple[str, str] | None:
     return None
 
 
+def entry_stake(p: dict) -> float:
+    """First-entry stake in $: the first DCA stage, or a flat stake_usd for strategies without DCA."""
+    stages = (p.get("dca") or {}).get("stages")
+    return float(stages[0]) if stages else float(p.get("stake_usd", 5.0))
+
+
 def decide(strategy: str, p: dict, view: MarketView, av: AssetView, side: Side, trigger: str,
            confidence: float | None, extra_gates: list[tuple[str, str] | None] = (),
            features: dict | None = None, prediction: dict | None = None) -> Decision:
     """Run the shared gates (in a fixed, documented order) after a trigger fired."""
     book = av.book(side)
     price = book.ask if book else None
-    checks = [gate_direction(p, side), gate_timing(p, view), *extra_gates, gate_book(p, book)]
+    features = dict(features or {})
+    fair_gate = None
+    # Every strategy must at least not buy what the fair-value model says is overpriced after the fee.
+    # Strategies that already did this sum themselves put `fair_value` in their features and are skipped.
+    if price is not None and p.get("min_fair_edge") is not None and "fair_value" not in features:
+        strike = strike_of(av.features)
+        if av.price and strike:
+            fu, fd = compute_fair_probability(av.price, strike, view.secs_left, annual_vol(av.features.get("vol_60s")),
+                                              twap_avg=av.features.get("twap_avg"))
+            fair = fu if side == "UP" else fd
+            edge = round(fair - price - taker_fee(1.0, price), 4)
+            features |= {"fair_value": fair, "edge": edge}
+            if edge < p["min_fair_edge"] - 1e-9:
+                fair_gate = ("negative_edge", f"fair value {fair * 100:.0f}¢ − ask {price * 100:.0f}¢ − fee leaves {edge * 100:+.1f}¢ "
+                                              f"(min {p['min_fair_edge'] * 100:.1f}¢)")
+    checks = [gate_direction(p, side), gate_timing(p, view), *extra_gates, fair_gate, gate_book(p, book)]
     if price is not None:
         checks.append(gate_price(p, price))
     fail = next((c for c in checks if c), None)
-    feats = {"trigger": trigger, **(features or {}), "spot": av.price, "window_delta": av.delta,
+    feats = {"trigger": trigger, **features, "spot": av.price, "window_delta": av.delta,
              "ask": price, "spread": book.spread if book else None, "depth": book.ask_depth if book else None}
     return Decision(strategy=strategy, asset=av.asset, side=side, status="rejected" if fail else "accepted",
                     reason=f"{trigger}; skipped: {fail[1]}" if fail else trigger, code=fail[0] if fail else "ok",
                     token_price=price, confidence=confidence, secs_in=int(view.secs_in), features=feats,
-                    market_id=av.market_id, stake_usd=p["dca"]["stages"][0] if not fail else None, prediction=prediction)
+                    market_id=av.market_id, stake_usd=entry_stake(p) if not fail else None, prediction=prediction)

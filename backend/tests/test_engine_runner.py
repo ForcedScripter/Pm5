@@ -11,6 +11,7 @@ from app.market_data.clob import OrderBook
 from app.market_data.hub import Hub
 from app.market_discovery.registry import MarketInfo
 from app.models import ExecutionLog, Market, Signal, Strategy, StrategyConfiguration, User, UserSettings
+from app.strategies.catalog import defaults, validate_params
 from app.strategies.engine.runner import StrategyRunner, pnl_per_dollar
 
 
@@ -59,7 +60,8 @@ async def _setup(deltas: dict, now: float, xrp_ask=0.52):
         const = (await db.execute(select(Strategy).where(Strategy.key == "constellation"))).scalar_one()
         await db.execute(update(StrategyConfiguration).where(StrategyConfiguration.user_id == user.id).values(enabled=False))
         await db.execute(update(StrategyConfiguration).where(StrategyConfiguration.user_id == user.id,
-                         StrategyConfiguration.strategy_id == const.id, StrategyConfiguration.is_current).values(enabled=True))
+                         StrategyConfiguration.strategy_id == const.id, StrategyConfiguration.is_current).values(
+                             enabled=True, params=validate_params('constellation', {**defaults('constellation'), 'min_fair_edge': None})))
         await db.commit()
     r = StrategyRunner(md, hub)
     return r, md, hub, ws, user.id
@@ -165,7 +167,7 @@ async def test_start_stop_and_stats_api(client, auth):
     await client.post("/api/emergency-stop/clear", headers=auth)
     assert (await client.post("/api/paper-trading/stop", headers=auth)).json()["bot_running"] is False
     stats = (await client.get("/api/signals/stats", headers=auth)).json()
-    assert {s["strategy"] for s in stats} >= {"constellation", "ai_strat", "pocket_aces"}
+    assert {s["strategy"] for s in stats} >= {"constellation", "binance_lead", "pocket_aces"}
     assert (await client.get("/api/signals?strategy=nope", headers=auth)).status_code == 404
     assert isinstance((await client.get("/api/signals?strategy=constellation", headers=auth)).json(), list)
     m = (await client.get("/api/ai/models", headers=auth)).json()

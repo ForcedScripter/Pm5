@@ -16,7 +16,8 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.database.session import SessionLocal
-from app.models import (ExecutionLog, Market, Position, Signal, Strategy, StrategyConfiguration, UserSettings)
+from app.execution.fees import taker_fee
+from app.models import (ExecutionLog, Market, MarketToken, Position, Signal, Strategy, StrategyConfiguration, UserSettings)
 from app.portfolio import service as pf
 from app.risk.engine import OrderIntent, check
 from app.strategies.scalper.core import EntryTracker, ExitTracker, Tick, entry_step, exit_step, multiplier
@@ -39,6 +40,7 @@ class ScalperEngine:
         self._busy: set = set()
         self._tokens: dict[uuid.UUID, str] = {}          # open position → token id
         self._pos_params: dict[uuid.UUID, dict] = {}     # open position → its strategy params
+        self._hedge_meta: dict[uuid.UUID, str] = {}      # open, unhedged position → opposite-side token
         self._loaded = False
         self.status = {"last_tick": None, "entries": 0, "exits": 0, "errors": 0, "last_error": None}
         self._stop = asyncio.Event()
@@ -138,6 +140,10 @@ class ScalperEngine:
                 intent = OrderIntent("entry", str(m.id), side, p["stake_usd"], ask, s.get("bid"), limit, m.end - time.time(),
                                      book_synced=bool(s.get("synced")), book_age_s=s.get("age_s"), spread=s.get("spread"),
                                      ask_depth=float(s.get("ask_depth") or 0), fee_rate=m.fee_rate, fee_exponent=m.fee_exponent)
+                if mode == "live":
+                    dec = await pf.edge_decay(db, us.user_id, KEY, us.risk)
+                    if dec["paused"]:
+                        return
                 st, _ = await pf.state(db, us.user_id, mode, self.orders._marks(), await self.orders._live_cash(ex))
                 r = check(us.risk, st, intent, now=time.time(), emergency_stopped=us.emergency_stopped)
                 mkt = await db.get(Market, m.id)
@@ -175,6 +181,7 @@ class ScalperEngine:
                 await db.commit()
                 self.exits[pos.id] = ExitTracker(time.time(), avg, res.shares, res.cost + res.fees, m.fee_rate, m.fee_exponent)
                 self._tokens[pos.id], self._pos_params[pos.id] = token, p
+                self._hedge_meta[pos.id] = m.token("DOWN" if side == "UP" else "UP")
                 self.status["entries"] += 1
                 self.orders.emit({"type": "position", "event": "opened", "mode": mode, "asset": m.asset, "side": side,
                                   "strategy": KEY})
@@ -189,10 +196,106 @@ class ScalperEngine:
             token = self._tokens.get(pid)
             if pid in self._busy or token is None:
                 continue
-            out = exit_step(self._pos_params.get(pid) or self._default_params(), ex, self._tick_for(token, now, secs_in))
+            p = self._pos_params.get(pid) or self._default_params()
+            if p.get("enable_straddle_hedge", True) and (h := self._hedge_candidate(pid, ex, p)):
+                self._busy.add(pid)
+                asyncio.create_task(self._hedge(pid, h[0]))
+                continue
+            out = exit_step(p, ex, self._tick_for(token, now, secs_in))
             if out:
                 self._busy.add(pid)
                 asyncio.create_task(self._exit(pid, out[1]))
+
+    def _hedge_candidate(self, pid: uuid.UUID, ex: ExitTracker, p: dict) -> tuple[str, float] | None:
+        """Cheap in-memory check (runs every tick): is the opposite side cheap enough that buying it
+        locks a guaranteed $1.00 payout above both legs' cost incl. fees? Returns (opp_token, opp_ask)."""
+        meta = self._hedge_meta.get(pid)
+        if meta is None:
+            return None
+        opp_token = meta
+        ob = self.md.books.book(opp_token)
+        if not ob or not ob.best_ask or ex.shares <= 0:
+            return None
+        opp_ask = ob.best_ask
+        leg1 = ex.cost / ex.shares                                               # per share, incl. entry fee
+        leg2 = opp_ask + taker_fee(ex.shares, opp_ask, ex.fee_rate, ex.fee_exp) / ex.shares
+        if leg1 + leg2 <= p.get("max_straddle_cost", 0.82):
+            return opp_token, opp_ask
+        return None
+
+    async def _hedge(self, pid: uuid.UUID, opp_token: str) -> None:
+        """Legged straddle: buy the opposite side through the risk engine with an Order row, like any entry."""
+        try:
+            async with SessionLocal() as db:
+                pos = await db.get(Position, pid)
+                if pos is None or pos.status != "open":
+                    return
+                m = await db.get(Market, pos.market_id)
+                us = await db.get(UserSettings, pos.user_id)
+                mode, executor = await self.orders.mode_and_executor(db, us)
+                opp_side = "DOWN" if pos.side == "UP" else "UP"
+                taken = (await db.execute(select(Position.id).where(
+                    Position.user_id == us.user_id, Position.mode == mode, Position.market_id == m.id,
+                    Position.side == opp_side))).first()
+                if taken:                                         # uq_position_market_side: never double-book
+                    self._hedge_meta.pop(pid, None)
+                    return
+                ob = self.md.books.book(opp_token)
+                s = ob.summary() if ob else {}
+                ask = s.get("ask")
+                if ask is None:
+                    return
+                shares = float(pos.shares)
+                limit = round(min(0.99, ask + 0.01), 2)
+                usd = round(shares * limit, 2)
+                intent = OrderIntent("dca", str(m.id), opp_side, usd, ask, s.get("bid"), limit, m.window_end.timestamp() - time.time(),
+                                     book_synced=bool(s.get("synced")), book_age_s=s.get("age_s"), spread=s.get("spread"),
+                                     ask_depth=float(s.get("ask_depth") or 0), fee_rate=float(m.fee_rate),
+                                     fee_exponent=float(m.fee_exponent))
+                st, _ = await pf.state(db, us.user_id, mode, self.orders._marks(), await self.orders._live_cash(executor))
+                r = check(us.risk, st, intent, now=time.time(), emergency_stopped=us.emergency_stopped)
+                if not r.ok:
+                    await self.orders._blocked(db, us, r.rule, r.message, r.detail, position_id=pid)
+                    await db.commit()
+                    return
+                order = await self.orders._new_order(db, us, mode, m, opp_token, opp_side, "BUY", "dca", "FOK", limit,
+                                                     usd, f"{pid}:hedge", position_id=pid)
+                if order is None:
+                    return
+                res = await executor.buy(opp_token, usd, limit, float(m.fee_rate), float(m.fee_exponent), "FOK")
+                await self.orders._record(db, order, res)
+                if res.shares <= 0:
+                    db.add(ExecutionLog(user_id=us.user_id, level="warn", category="order", order_id=order.id, position_id=pid,
+                                        message=f"[odds_scalper] straddle hedge not filled: {res.error or res.status}"))
+                    await db.commit()
+                    return
+                hedge = Position(user_id=us.user_id, strategy_config_id=pos.strategy_config_id, strategy_key=KEY,
+                                 asset=pos.asset, market_id=m.id, token_id=opp_token, mode=mode, side=opp_side,
+                                 status="open", shares=D(res.shares), cost_basis=D(res.cost + res.fees), fees=D(res.fees),
+                                 first_entry_price=D(res.cost / res.shares), dca_steps=1,
+                                 last_buy_at=dt.datetime.now(dt.UTC), window_end=pos.window_end)
+                db.add(hedge)
+                await db.flush()
+                order.position_id = hedge.id
+                total = (float(pos.cost_basis) + res.cost + res.fees) / min(shares, res.shares)
+                full = res.shares >= shares * 0.98
+                db.add(ExecutionLog(user_id=us.user_id, level="info", category="fill", order_id=order.id, position_id=hedge.id,
+                                    message=f"[odds_scalper] STRADDLE {'LOCKED' if full else 'PARTIAL'}: bought "
+                                            f"{pos.asset.upper()} {opp_side} {res.shares:.2f} sh @ {res.cost / res.shares * 100:.1f}¢; "
+                                            f"pair cost {total * 100:.1f}¢/sh incl. fees ({mode})"))
+                await db.commit()
+                self._hedge_meta.pop(pid, None)
+                if full:                                  # both legs now hold to resolution
+                    self.exits.pop(pid, None)
+                    self._tokens.pop(pid, None)
+                    self._pos_params.pop(pid, None)
+                    self._hedge_meta.pop(pid, None)
+                self.orders.emit({"type": "position", "event": "opened", "mode": mode, "asset": pos.asset,
+                                  "side": opp_side, "strategy": KEY})
+        except Exception:
+            log.exception("[odds_scalper] straddle hedge failed")
+        finally:
+            self._busy.discard(pid)
 
     def _default_params(self) -> dict:
         from app.strategies.catalog import defaults
@@ -206,11 +309,24 @@ class ScalperEngine:
                                      .join(StrategyConfiguration, StrategyConfiguration.id == Position.strategy_config_id)
                                      .join(Market, Market.id == Position.market_id)
                                      .where(Position.strategy_key == KEY, Position.status == "open"))).all()
+            mids = {pos.market_id for pos, *_ in rows}
+            tokens = {(mid, out): tok for mid, out, tok in (await db.execute(
+                select(MarketToken.market_id, MarketToken.outcome, MarketToken.token_id)
+                .where(MarketToken.market_id.in_(mids)))).all()} if mids else {}
+        # a market with both sides open is a locked straddle: both legs hold to resolution, never scalp them
+        sides: dict = {}
+        for pos, *_ in rows:
+            sides.setdefault((pos.user_id, pos.mode, pos.market_id), set()).add(pos.side)
         for pos, params, fr, fe in rows:
+            if len(sides[(pos.user_id, pos.mode, pos.market_id)]) > 1:
+                continue
             if pos.id not in self.exits:
                 self.exits[pos.id] = ExitTracker((pos.last_buy_at or pos.created_at).timestamp(), float(pos.first_entry_price),
                                                  float(pos.shares), float(pos.cost_basis), float(fr), float(fe))
             self._tokens[pos.id], self._pos_params[pos.id] = pos.token_id, params
+            opp = tokens.get((pos.market_id, "DOWN" if pos.side == "UP" else "UP"))
+            if opp:
+                self._hedge_meta.setdefault(pos.id, opp)
 
     async def _exit(self, pid: uuid.UUID, why: str) -> None:
         try:
@@ -265,6 +381,7 @@ class ScalperEngine:
                     self.exits.pop(pid, None)
                     self._tokens.pop(pid, None)
                     self._pos_params.pop(pid, None)
+                    self._hedge_meta.pop(pid, None)
                     self.status["exits"] += 1
                     self.orders.emit({"type": "position", "event": "settled", "mode": mode, "asset": pos.asset,
                                       "won": float(pos.realized_pnl) > 0, "pnl": float(pos.realized_pnl)})

@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from app.market_data.bars import RETURN_WINDOWS, pct
+from app.market_data.bars import RETURN_WINDOWS, TWAP_S, WINDOW_S, pct
 
 ASSETS = ("btc", "eth", "sol", "xrp", "doge", "bnb")
 FEATURES = [
@@ -64,6 +64,10 @@ class ArraySource:
         v = self.close[i]
         return None if math.isnan(v) else float(v)
 
+    def _closes(self, lo: int, hi: int) -> list[float]:
+        a, b = max(lo - self.ts0, 0), min(hi - self.ts0, len(self.close) - 1)
+        return [float(x) for x in self.close[a:b + 1] if not math.isnan(x)] if b >= a else []
+
     def features(self, window_start: int, now: int) -> dict:
         px = self._close(now)
         out: dict = {"ts": now, "price": px}
@@ -74,6 +78,10 @@ class ArraySource:
         out["window_open"] = open_px
         out["window_delta"] = pct(px, open_px)
         out["secs_in"] = now - window_start
+        pre = self._closes(window_start - TWAP_S, window_start - 1)
+        out["strike_twap"] = sum(pre) / len(pre) if len(pre) >= TWAP_S // 2 else None
+        fin = self._closes(window_start + WINDOW_S - TWAP_S, min(now, window_start + WINDOW_S - 1))
+        out["twap_avg"], out["twap_n"] = (sum(fin) / len(fin), len(fin)) if fin else (None, 0)
         lo, hi = now - 60 - self.ts0, now - self.ts0
         if lo >= 0 and hi < len(self.close):
             c = self.close[lo:hi + 1]

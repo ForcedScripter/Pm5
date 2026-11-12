@@ -58,9 +58,10 @@ def test_crossed_and_depth_and_walk():
 def test_gamma_parse_orders_tokens_and_reads_winner():
     ev = [{"slug": "btc-updown-5m-1793676300", "markets": [{
         "question": "Bitcoin Up or Down", "conditionId": "0xabc", "outcomes": '["Down", "Up"]',
-        "clobTokenIds": '["tokDown", "tokUp"]', "orderPriceMinTickSize": 0.01, "orderMinSize": 5,
+        "clobTokenIds": '["tokDown", "tokUp"]', "orderPriceMinTickSize": 0.01, "orderMinSize": 5, "rewardsMinSize": 50, "rewardsMaxSpread": 4.5,
         "closed": True, "outcomePrices": '["1", "0"]', "negRisk": False}]}]
     f = parse_gamma_event("btc", 1793676300, ev)
+    assert f["rewards_min_size"] == 50 and f["rewards_max_spread"] == 0.045
     assert (f["up_token"], f["down_token"]) == ("tokUp", "tokDown")
     assert f["winner"] == "DOWN" and f["closed"]
     ev[0]["markets"][0]["outcomePrices"] = '["0.6", "0.4"]'

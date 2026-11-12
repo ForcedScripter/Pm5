@@ -47,6 +47,12 @@ class OrderIntent:
     ask_depth: float = 0.0
     fee_rate: float = 0.07
     fee_exponent: float = 1.0
+    # A strategy built for the final minute (TWAP-lock) may lower the user's "min seconds before
+    # resolution" for its own entries. Never below MIN_SECS_FLOOR, and it can only lower, not raise.
+    min_secs_before_close: float | None = None
+
+
+MIN_SECS_FLOOR = 5.0
 
 
 @dataclass
@@ -75,9 +81,12 @@ def check(risk: dict, st: PortfolioState, oi: OrderIntent, *, now: float, emerge
     # ── risk-increasing orders ──
     if oi.ask is None:
         return _block("no_ask", "no ask to buy from")
-    if oi.secs_left < risk["min_seconds_before_resolution"]:
+    min_secs = risk["min_seconds_before_resolution"]
+    if oi.min_secs_before_close is not None:
+        min_secs = min(min_secs, max(MIN_SECS_FLOOR, oi.min_secs_before_close))
+    if oi.secs_left < min_secs:
         return _block("too_close_to_resolution", f"only {oi.secs_left:.0f}s before the round resolves "
-                      f"(min {risk['min_seconds_before_resolution']}s)", secs_left=oi.secs_left)
+                      f"(min {min_secs:g}s)", secs_left=oi.secs_left)
     if oi.spread is not None and oi.spread > risk["max_spread"] + 1e-9:
         return _block("max_spread", f"spread {oi.spread * 100:.1f}¢ > {risk['max_spread'] * 100:.1f}¢", spread=oi.spread)
     if oi.limit_price - oi.ask > risk["max_slippage"] + 1e-9:

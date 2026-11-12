@@ -40,6 +40,9 @@ class Settings(BaseSettings):
 
     # Market-data pipeline (Binance + Polymarket collectors). Off in tests.
     market_data_enabled: bool = True
+    # Weather data collection (read only, no orders): METAR reports, ensemble forecasts and price ladders
+    weather_enabled: bool = True
+    weather_cities: str = "london,nyc,hong-kong,munich,madrid,paris,chicago,tokyo"
     price_history_retention_days: int = 30
     snapshot_retention_days: int = 90
 

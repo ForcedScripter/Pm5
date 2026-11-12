@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 RETURN_WINDOWS = (1, 5, 10, 15, 30, 60)
 WINDOW_S = 300
+TWAP_S = 60          # the markets settle on a 60-second average (Chainlink TWAP stream)
 
 
 @dataclass(slots=True)
@@ -72,6 +73,17 @@ class BarBuffer:
                 break
         return None
 
+    def closes_between(self, lo: int, hi: int) -> list[float]:
+        """Closes of bars with lo <= ts <= hi, oldest first."""
+        out: list[float] = []
+        for b in reversed(self.bars):
+            if b.ts < lo:
+                break
+            if b.ts <= hi:
+                out.append(b.close)
+        out.reverse()
+        return out
+
     def window(self, seconds: int) -> list[Bar]:
         if not self.bars:
             return []
@@ -83,6 +95,24 @@ def pct(a: float | None, b: float | None) -> float | None:
     if a is None or b is None or b == 0:
         return None
     return (a - b) / b * 100.0
+
+
+_FEAT_CACHE: dict[int, tuple[tuple, dict]] = {}
+
+
+def features_cached(buf: BarBuffer, window_start: int) -> dict:
+    """`features()` for the latest bar, computed once per new bar and shared by everything that asks
+    (strategy runner several times a second, the UI frame). Treat the result as read-only."""
+    last = buf.last
+    if last is None:
+        return {}
+    key = (window_start, last.ts, last.close, len(buf))
+    hit = _FEAT_CACHE.get(id(buf))
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    f = features(buf, window_start)
+    _FEAT_CACHE[id(buf)] = (key, f)
+    return f
 
 
 def features(buf: BarBuffer, window_start: int, now: int | None = None) -> dict:
@@ -99,6 +129,14 @@ def features(buf: BarBuffer, window_start: int, now: int | None = None) -> dict:
     out["window_open"] = open_px
     out["window_delta"] = pct(px, open_px)
     out["secs_in"] = now - window_start
+    # Settlement terms. The market pays "Up" if the 60s average at the close is >= the price at the
+    # start, and that start price is itself the 60s average ending at the window start. So the true
+    # strike is `strike_twap`, not the 1-second open; and once the final minute begins, `twap_avg`
+    # (the average so far, over `twap_n` seconds) is already locked into the result.
+    pre = buf.closes_between(window_start - TWAP_S, window_start - 1)
+    out["strike_twap"] = sum(pre) / len(pre) if len(pre) >= TWAP_S // 2 else None
+    fin = buf.closes_between(window_start + WINDOW_S - TWAP_S, min(now, window_start + WINDOW_S - 1))
+    out["twap_avg"], out["twap_n"] = (sum(fin) / len(fin), len(fin)) if fin else (None, 0)
     # realised volatility of 1s log returns over the last 60s, as % per sqrt(60s)
     closes = [b.close for b in buf.window(61) if b.ts <= now]
     rets = [math.log(b / a) for a, b in zip(closes, closes[1:]) if a > 0 and b > 0]

@@ -1,8 +1,8 @@
 /** Mirrors backend/app/strategies/catalog.py MODE_PRESETS and DCA presets (reference values). */
 export const MODE_PRESETS = {
-  selective: { up_threshold: 0.08, down_threshold: 0.14, entry_low: 0.42, entry_high: 0.62, max_concurrent: 2 },
-  balanced: { up_threshold: 0.055, down_threshold: 0.1, entry_low: 0.38, entry_high: 0.68, max_concurrent: 3 },
-  aggressive: { up_threshold: 0.015, down_threshold: 0.03, entry_low: 0.35, entry_high: 0.75, max_concurrent: 4 },
+  selective: { up_threshold: 0.08, down_threshold: 0.14, entry_low: 0.42, entry_high: 0.62, max_concurrent: 2, min_consensus: 4 },
+  balanced: { up_threshold: 0.055, down_threshold: 0.1, entry_low: 0.38, entry_high: 0.68, max_concurrent: 3, min_consensus: 4 },
+  aggressive: { up_threshold: 0.04, down_threshold: 0.07, entry_low: 0.35, entry_high: 0.75, max_concurrent: 4, min_consensus: 4 },
 } as const;
 
 export const DCA_PRESETS = {

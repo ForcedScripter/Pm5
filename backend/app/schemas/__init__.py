@@ -64,6 +64,7 @@ class StrategyOut(BaseModel):
     version: int
     params: dict
     defaults: dict
+    edge_decay: dict | None = None      # {"paused", "mean_pnl", "n", "window"}
 
 
 class StrategyParamsIn(BaseModel):
@@ -82,8 +83,13 @@ class RiskSettings(BaseModel):
     max_spread: float = Field(0.04, gt=0, lt=1)
     max_slippage: float = Field(0.02, ge=0, lt=0.5)
     min_seconds_before_resolution: int = Field(60, ge=0, le=299)
-    loss_cooldown_s: int = Field(0, ge=0)
+    loss_cooldown_s: int = Field(900, ge=0)      # 3 losses in a row → no new entries for 15 minutes
     consecutive_losses_for_cooldown: int = Field(3, ge=1)
+    # edge decay (npcnpc09: their profitable strategy died as per-trade P&L slid negative while the win
+    # rate held ~90%): block a strategy's LIVE entries while its mean P&L over the last N closed trades
+    # (paper + live) is below 0. Paper keeps trading so a recovery can show up. 0 = off.
+    edge_decay_window: int = Field(30, ge=0, le=500)
+    edge_decay_min_trades: int = Field(20, ge=1, le=500)
 
 
 class AcceptanceCriteria(BaseModel):

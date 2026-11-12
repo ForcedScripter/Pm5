@@ -12,7 +12,7 @@ import os
 import time
 import uuid
 
-from app.market_data.bars import features
+from app.market_data.bars import features_cached
 from app.market_data.binance import BinanceCollector
 from app.market_data.clob import BookService
 from app.market_data.hub import ASSETS, Hub, hub
@@ -29,7 +29,9 @@ class MarketDataService:
         self.books = BookService(hub, self.registry, redis)
         self.binance = BinanceCollector(hub, redis)
         self.tasks: list[asyncio.Task] = []
-        self.node = f"{os.uname().nodename}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
+        import platform
+        node_name = platform.node() or "localhost"
+        self.node = f"{node_name}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
         self.leader = False
 
     async def start(self) -> None:
@@ -61,13 +63,28 @@ class MarketDataService:
         from app.strategies.scalper.engine import ScalperEngine
         self.scalper = ScalperEngine(self, self.hub, self.orders)
         self.tasks.append(asyncio.create_task(self.scalper.run()))
+        from app.strategies.maker.engine import MakerEngine
+        self.maker = MakerEngine(self, self.hub, self.orders)        # Spork Maker (paper only)
+        self.tasks.append(asyncio.create_task(self.maker.run()))
+        from app.strategies.arb.engine import ArbEngine
+        self.arb = ArbEngine(self, self.hub, self.orders)            # pair arbitrage (paper only)
+        self.tasks.append(asyncio.create_task(self.arb.run()))
+        from app.strategies.strikes.engine import StrikeEngine
+        self.strikes = StrikeEngine(self, self.hub, self.orders)     # crypto strike markets (paper only)
+        self.tasks.append(asyncio.create_task(self.strikes.run()))
+        from app.core.config import get_settings
+        if get_settings().weather_enabled:
+            from app.external.weather import WeatherCollector
+            self.weather = WeatherCollector(self.hub)                  # data only: places no orders
+            self.tasks.append(asyncio.create_task(self.weather.run()))
         for coro in (self.binance.run(), self.registry.run(), self.books.run(), self._broadcast(), self._renew(),
                      self._retention(), self._loop_lag()):
             self.tasks.append(asyncio.create_task(coro))
 
     async def stop(self) -> None:
         for svc in (self.binance, self.registry, self.books, getattr(self, "runner", None), getattr(self, "orders", None),
-                    getattr(self, "scalper", None)):
+                    getattr(self, "scalper", None), getattr(self, "maker", None), getattr(self, "strikes", None),
+                    getattr(self, "weather", None), getattr(self, "arb", None)):
             if svc:
                 svc.stop()
         for t in self.tasks:
@@ -138,7 +155,7 @@ class MarketDataService:
         for a in ASSETS:
             buf, sp = self.hub.bars[a], self.hub.spot[a]
             last = buf.last
-            f = features(buf, ws) if last else {}
+            f = features_cached(buf, ws) if last else {}
             m = self.registry.current.get(a)
             market = None
             if m:

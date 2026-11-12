@@ -16,6 +16,7 @@ from app.database.session import get_db
 from app.models import ExecutionLog, Strategy, StrategyConfiguration, Trade, User, UserSettings
 from app.schemas import (AcceptanceCriteria, LoginIn, RiskSettings, SettingsIn, SettingsOut, StrategyOut,
                          StrategyParamsIn, TokenOut, WalletIn, WalletOut)
+from app.portfolio import service as pf
 from app.services import wallet as wallet_svc
 from app.strategies.catalog import CATALOG, defaults, validate_params
 
@@ -88,19 +89,23 @@ async def _current_cfg(db, user_id, key) -> tuple[Strategy, StrategyConfiguratio
     return row[0], row[1]
 
 
-def _strat_out(s: Strategy, c: StrategyConfiguration) -> StrategyOut:
+def _strat_out(s: Strategy, c: StrategyConfiguration, decay: dict | None = None) -> StrategyOut:
     return StrategyOut(key=s.key, name=s.name, description=s.description, enabled=c.enabled,
-                       version=c.version, params=c.params, defaults=defaults(s.key))
+                       version=c.version, params=c.params, defaults=defaults(s.key), edge_decay=decay)
 
 
 @router.get("/strategies", response_model=list[StrategyOut])
 async def list_strategies(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(
         select(Strategy, StrategyConfiguration).join(StrategyConfiguration, StrategyConfiguration.strategy_id == Strategy.id)
-        .where(StrategyConfiguration.user_id == user.id, StrategyConfiguration.is_current)
+        .where(StrategyConfiguration.user_id == user.id, StrategyConfiguration.is_current,
+               Strategy.key.in_(list(CATALOG)))
     )).all()
     order = list(CATALOG)
-    return sorted((_strat_out(s, c) for s, c in rows), key=lambda x: order.index(x.key))
+    us = await db.get(UserSettings, user.id)
+    risk = us.risk if us else {}
+    out = [_strat_out(s, c, await pf.edge_decay(db, user.id, s.key, risk)) for s, c in rows]
+    return sorted(out, key=lambda x: order.index(x.key))
 
 
 @router.get("/strategies/{key}", response_model=StrategyOut)

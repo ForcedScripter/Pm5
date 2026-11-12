@@ -1,6 +1,6 @@
 import * as Tabs from "@radix-ui/react-tabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Cog, Gauge, OctagonX, Server, ShieldAlert, XCircle } from "lucide-react";
+import { CheckCircle2, Cog, Gauge, OctagonX, RotateCcw, Server, ShieldAlert, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -98,6 +98,19 @@ function RiskPanel() {
     mutationFn: () => Api.saveSettings({ risk: risk!, acceptance: acc!, paper_bankroll: bankroll ?? undefined }),
     onSuccess: (d) => { qc.setQueryData(["settings"], d); qc.invalidateQueries({ queryKey: ["readiness"] }); },
   });
+  const [confirmReset, setConfirmReset] = useState(false);
+  const resetBook = useMutation({
+    mutationFn: () => Api.resetBook(),
+    onSuccess: () => {
+      setConfirmReset(false);
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
+      qc.invalidateQueries({ queryKey: ["positions"] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["trades"] });
+      qc.invalidateQueries({ queryKey: ["logs"] });
+      qc.invalidateQueries({ queryKey: ["readiness"] });
+    },
+  });
   if (!risk || !acc) return <Panel><Empty>Loading…</Empty></Panel>;
   const dirty = JSON.stringify({ risk, acc, bankroll }) !== JSON.stringify({ risk: s.data!.risk, acc: s.data!.acceptance, bankroll: s.data!.paper_bankroll });
   return (
@@ -111,6 +124,37 @@ function RiskPanel() {
         {ACC_FIELDS.map((f) => <NumberField key={f.k} label={f.label} step={f.step} value={acc[f.k]} onChange={(v) => setAcc({ ...acc, [f.k]: v ?? 0 })} />)}
         {save.error && <p className="text-sm text-down" role="alert">{save.error.message}</p>}
         <Button variant="gold" className="mt-3 w-full" disabled={!dirty} loading={save.isPending} onClick={() => save.mutate()}>{save.isSuccess && !dirty ? "Saved ✓" : "Save risk settings"}</Button>
+
+        <div className="panel-title !mt-6 !text-[10.5px]">Paper book management</div>
+        <div className="space-y-2 rounded-xl border border-line-mid bg-bg-0/60 p-3.5">
+          <div>
+            <div className="text-xs font-semibold text-tx-hi">Reset paper book</div>
+            <p className="text-[11px] text-tx-low">Clears paper trades, open positions, and resets drawdown back to 0% and fresh starting bankroll.</p>
+          </div>
+          {resetBook.error && <p className="text-xs text-down">{resetBook.error.message}</p>}
+          {resetBook.isSuccess && !confirmReset && <p className="text-xs text-up">Paper book and drawdown reset to 0% ✓</p>}
+          {confirmReset ? (
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-[11.5px] text-tx-mid">Are you sure?</span>
+              <Button size="sm" variant="danger" loading={resetBook.isPending} onClick={() => resetBook.mutate()}>
+                Yes, reset book
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmReset(false)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full text-xs hover:border-down/60 hover:text-down"
+              onClick={() => setConfirmReset(true)}
+            >
+              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+              Reset paper book
+            </Button>
+          )}
+        </div>
       </div>
     </Panel>
   );
@@ -124,7 +168,7 @@ function EngineNote() {
   </span>;
 }
 
-const TAB_BADGE: Record<string, string> = { constellation: "reference default", ai_strat: "ML", pocket_aces: "preset" };
+const TAB_BADGE: Record<string, string> = { binance_lead: "alpha lead", twap_lock: "final minute", constellation: "reference default", pocket_aces: "sniper", spork_maker: "maker", crypto_strikes: "strike markets", pair_arb: "arbitrage" };
 
 function Strategies() {
   const q = useQuery({ queryKey: ["strategies"], queryFn: Api.strategies });

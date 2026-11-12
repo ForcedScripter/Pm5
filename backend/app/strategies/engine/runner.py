@@ -20,7 +20,7 @@ from decimal import Decimal
 from sqlalchemy import select, text
 
 from app.database.session import SessionLocal
-from app.market_data.bars import features
+from app.market_data.bars import features_cached, pct
 from app.market_data.hub import ASSETS
 from app.execution.fees import net_pnl_per_dollar
 from app.models import ExecutionLog, Market, ModelPrediction, Signal, Strategy, StrategyConfiguration, UserSettings
@@ -30,10 +30,12 @@ from app.strategies.engine.base import AssetView, Book, Context, Decision, Marke
 from app.strategies.engine.rules import RULE_STRATEGIES
 
 log = logging.getLogger(__name__)
-STRATEGIES = {**RULE_STRATEGIES, "ai_strat": ai_strat}
+STRATEGIES = RULE_STRATEGIES
 # rejections that aren't "near misses" worth recording: the round's entry window simply isn't open,
 # or there is no market data. Real gates (band, spread, depth, consensus, edge, ...) are recorded.
 NOT_NEAR_MISS = {"too_early", "too_late", "no_book"}
+TICK_HZ = 4                   # strategy evaluations per second
+LIVE_SPOT_MAX_AGE_S = 1.5     # use the live Binance quote while it is this fresh; else the last closed 1s bar
 
 
 def pnl_per_dollar(price: float, won: bool, fee_rate: float = 0.07, fee_exponent: float = 1.0) -> float:
@@ -53,6 +55,7 @@ class StrategyRunner:
         self._cfg_cache: tuple[float, dict] = (0, {})
         self._outcomes: tuple[int, dict] = (0, {})
         self._model: tuple[float, tuple | None] = (0, None)
+        self._closes: dict[str, tuple[int, tuple]] = {}        # asset -> (last bar ts, last 300 closes)
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -71,9 +74,21 @@ class StrategyRunner:
             if m and m.start == ws:
                 ub, db = self.md.books.book(m.up_token), self.md.books.book(m.down_token)
                 up, dn = Book.from_summary(ub.summary() if ub else None), Book.from_summary(db.summary() if db else None)
-            frame_assets[a] = AssetView(a, last.close if last else None, features(buf, ws) if last else {},
-                                        str(m.id) if m and m.start == ws else None, m.start if m else None, up, dn,
-                                        tuple(b.close for b in list(buf.bars)[-300:]))
+            price = last.close if last else None
+            f = features_cached(buf, ws) if last else {}
+            sp = self.hub.spot.get(a)
+            live = sp.mid if sp and sp.updated and now - sp.updated <= LIVE_SPOT_MAX_AGE_S else None
+            if live and f:
+                # The closed 1s bar is up to a second old. The live quote replaces the price and the move since
+                # the open; everything averaged over bars (volatility, strike, closing average) stays bar-based.
+                f = {**f, "price": live, "price_bar": f.get("price")}
+                if f.get("window_open"):
+                    f["window_delta"] = pct(live, f["window_open"])
+                price = live
+            if last and self._closes.get(a, (None,))[0] != last.ts:
+                self._closes[a] = (last.ts, tuple(b.close for b in list(buf.bars)[-300:]))
+            frame_assets[a] = AssetView(a, price, f, str(m.id) if m and m.start == ws else None, m.start if m else None, up, dn,
+                                        self._closes[a][1] if last else ())
         return MarketView(now=now, window_start=ws, assets=frame_assets)
 
     async def _configs(self, db) -> dict:
@@ -119,9 +134,14 @@ class StrategyRunner:
         tasks = [asyncio.create_task(self._resolver()), asyncio.create_task(self._retrainer())]
         try:
             while not self._stop.is_set():
-                await asyncio.sleep(1.0 - (time.time() % 1.0) + 0.2)   # just after the market frame
+                period = 1.0 / TICK_HZ
+                await asyncio.sleep(period - (time.time() % period) + 0.01)
                 try:
+                    t0 = time.perf_counter()
                     await self.tick()
+                    ms = (time.perf_counter() - t0) * 1000
+                    self.status["tick_ms"] = round(0.95 * self.status.get("tick_ms", ms) + 0.05 * ms, 2)
+                    self.status["tick_ms_max"] = round(max(self.status.get("tick_ms_max", 0.0) * 0.999, ms), 1)
                 except Exception as e:  # noqa: BLE001 - one bad tick must not stop the engine
                     self.status["errors"] += 1
                     self.status["last_error"] = f"{type(e).__name__}: {e}"[:200]
@@ -143,8 +163,6 @@ class StrategyRunner:
                 await self._restore_round(db, view.window_start)
             outcomes = await self._recent_outcomes(db, view.window_start)
             predictor = None
-            if any(k == "ai_strat" for v in cfgs.values() for k, _, _ in v):
-                predictor = await self._predictor(db)
             made: list[Decision] = []
             for uid, items in cfgs.items():
                 ctx = Context(recent_outcomes=outcomes, predictor=predictor,
@@ -161,6 +179,10 @@ class StrategyRunner:
                             if d.status == "accepted":     # visible to later strategies' ctx this tick
                                 ctx.accepted_this_window[(key, d.asset)] = ctx.accepted_this_window.get((key, d.asset), 0) + 1
             await db.commit()
+        if any(d.status == "accepted" for d in made):          # hand over now, not on the order manager's next timer
+            wake = getattr(getattr(self.md, "orders", None), "wake", None)
+            if wake is not None:
+                wake.set()
         for d in made:
             self.hub.publish_channel("signals", {"type": "signal", "strategy": d.strategy, "asset": d.asset, "side": d.side,
                                                  "status": d.status, "code": d.code, "reason": d.reason, "price": d.token_price,
@@ -202,7 +224,7 @@ class StrategyRunner:
                      market_id=uuid.UUID(d.market_id), mode="paper", side=d.side, secs_in=d.secs_in,
                      token_price=Decimal(str(d.token_price)) if d.token_price is not None else Decimal(0),
                      confidence=Decimal(str(d.confidence)) if d.confidence is not None else None,
-                     status=d.status, reason=d.reason[:2000], features=_jsonable({**d.features, "code": d.code}))
+                     status=d.status, reason=d.reason[:2000], features=_jsonable({**d.features, "code": d.code, "t": round(view.now, 3)}))
         db.add(sig)
         if d.prediction:
             pr = d.prediction

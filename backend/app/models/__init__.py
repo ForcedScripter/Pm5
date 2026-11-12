@@ -11,7 +11,7 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import (BigInteger, Boolean, CheckConstraint, DateTime, Enum, ForeignKey, Index,
+from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Date, DateTime, Enum, ForeignKey, Index,
                         Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -315,6 +315,160 @@ class Trade(TimestampMixin, Base):
     closed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     __table_args__ = (Index("ix_trades_user_mode_closed", "user_id", "mode", "closed_at"),
                       Index("ix_trades_filters", "user_id", "asset", "strategy_key"))
+
+
+class MakerRound(TimestampMixin, Base):
+    """One Spork Maker round: N complete sets minted, two resting sells, merge + redeem.
+    Kept out of `positions` (a minted pair holds BOTH sides, which uq_position_market_side forbids
+    and which would collide with directional strategies trading the same market)."""
+    __tablename__ = "maker_rounds"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    strategy_config_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("strategy_configurations.id"))
+    market_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("markets.id"))
+    asset: Mapped[str] = mapped_column(String(10))
+    mode: Mapped[str] = mapped_column(TradingMode)
+    status: Mapped[str] = mapped_column(String(12), default="quoting")    # quoting | merged | settled | aborted
+    sets: Mapped[Decimal] = mapped_column(MONEY)
+    up_left: Mapped[Decimal] = mapped_column(MONEY)
+    down_left: Mapped[Decimal] = mapped_column(MONEY)
+    proceeds: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
+    merged_sets: Mapped[Decimal | None] = mapped_column(MONEY)
+    residual_side: Mapped[str | None] = mapped_column(Side)
+    residual_shares: Mapped[Decimal | None] = mapped_column(MONEY)
+    redeem_value: Mapped[Decimal | None] = mapped_column(MONEY)
+    pnl: Mapped[Decimal | None] = mapped_column(MONEY)
+    rebate_est: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
+    edge: Mapped[Decimal] = mapped_column(PRICE)
+    fills: Mapped[list] = mapped_column(JSONB, default=list)
+    diag: Mapped[dict] = mapped_column(JSONB, default=dict)
+    window_end: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("user_id", "mode", "market_id", name="uq_maker_round_market"),
+                      Index("ix_maker_rounds_user_mode_status", "user_id", "mode", "status"))
+
+
+class ArbPair(TimestampMixin, Base):
+    """One Pair Arbitrage purchase: equal shares of Up and Down in one round, bought for under $1 all-in."""
+    __tablename__ = "arb_pairs"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    strategy_config_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("strategy_configurations.id"))
+    market_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("markets.id"))
+    asset: Mapped[str] = mapped_column(String(10))
+    mode: Mapped[str] = mapped_column(TradingMode)
+    status: Mapped[str] = mapped_column(String(8), default="open")     # open | settled
+    shares: Mapped[Decimal] = mapped_column(MONEY)
+    up_price: Mapped[Decimal] = mapped_column(PRICE)
+    down_price: Mapped[Decimal] = mapped_column(PRICE)
+    cost: Mapped[Decimal] = mapped_column(MONEY)                       # both legs, before fees
+    fees: Mapped[Decimal] = mapped_column(MONEY)
+    locked_pnl: Mapped[Decimal] = mapped_column(MONEY)                 # shares − cost − fees
+    pnl: Mapped[Decimal | None] = mapped_column(MONEY)
+    diag: Mapped[dict] = mapped_column(JSONB, default=dict)
+    window_end: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    opened_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index("ix_arb_pairs_user_mode_status", "user_id", "mode", "status"),)
+
+
+class StrikeMarket(TimestampMixin, Base):
+    """A crypto strike market ("BTC above $74,000 on Nov 11", "BTC reach $78,000 Nov 9-15"). Kept apart
+    from `markets`, which is built around 5-minute Up/Down windows."""
+    __tablename__ = "strike_markets"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    slug: Mapped[str] = mapped_column(String(200), unique=True)
+    event_slug: Mapped[str] = mapped_column(String(200), index=True)
+    question: Mapped[str] = mapped_column(Text, default="")
+    asset: Mapped[str] = mapped_column(String(10))
+    kind: Mapped[str] = mapped_column(String(8))                       # above | reach | dip
+    strike: Mapped[Decimal] = mapped_column(MONEY)
+    range_start: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))   # hit markets only
+    expiry: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    condition_id: Mapped[str] = mapped_column(String(80))
+    yes_token: Mapped[str] = mapped_column(String(100))
+    no_token: Mapped[str] = mapped_column(String(100))
+    tick_size: Mapped[Decimal] = mapped_column(PRICE, default=Decimal("0.01"))
+    min_order_size: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(5))
+    fee_rate: Mapped[Decimal] = mapped_column(PRICE, default=Decimal("0.07"))
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    winner: Mapped[str | None] = mapped_column(String(3))              # YES | NO, as Polymarket resolved it
+    own_winner: Mapped[str | None] = mapped_column(String(3))          # YES | NO, from Binance candles ourselves
+    own_detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    samples: Mapped[dict] = mapped_column(JSONB, default=dict)         # model vs market at fixed times before expiry
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index("ix_strike_markets_open", "closed", "expiry"),)
+
+
+class StrikePosition(TimestampMixin, Base):
+    """One paper position in a strike market: a resting buy that filled, then sold or held to settlement."""
+    __tablename__ = "strike_positions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    strategy_config_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("strategy_configurations.id"))
+    strike_market_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("strike_markets.id"))
+    mode: Mapped[str] = mapped_column(TradingMode)
+    side: Mapped[str] = mapped_column(String(3))                       # YES | NO
+    status: Mapped[str] = mapped_column(String(8), default="open")     # open | sold | won | lost | void
+    shares: Mapped[Decimal] = mapped_column(MONEY)
+    entry_price: Mapped[Decimal] = mapped_column(PRICE)
+    cost: Mapped[Decimal] = mapped_column(MONEY)
+    model_prob: Mapped[Decimal] = mapped_column(PRICE)                 # model value of our side when it filled
+    mark: Mapped[Decimal | None] = mapped_column(PRICE)                # latest bid for our side
+    exit_price: Mapped[Decimal | None] = mapped_column(PRICE)
+    fees: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
+    pnl: Mapped[Decimal | None] = mapped_column(MONEY)
+    diag: Mapped[dict] = mapped_column(JSONB, default=dict)
+    opened_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("user_id", "mode", "strike_market_id", name="uq_strike_position_market"),
+                      Index("ix_strike_positions_user_mode_status", "user_id", "mode", "status"))
+
+
+class WeatherEvent(TimestampMixin, Base):
+    """One "Highest temperature in <city> on <date>" event and how it ended. Data collection only."""
+    __tablename__ = "weather_events"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    slug: Mapped[str] = mapped_column(String(200), unique=True)
+    city: Mapped[str] = mapped_column(String(60))
+    station: Mapped[str] = mapped_column(String(8))                    # ICAO airport code the market settles on
+    unit: Mapped[str] = mapped_column(String(1))                       # C | F
+    local_date: Mapped[dt.date] = mapped_column(Date)
+    end_date: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    utc_offset_s: Mapped[int | None] = mapped_column(Integer)
+    buckets: Mapped[list] = mapped_column(JSONB, default=list)         # [{label, lo, hi, slug}]
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    winner_label: Mapped[str | None] = mapped_column(String(40))       # the bucket Polymarket resolved
+    own_max_c: Mapped[Decimal | None] = mapped_column(Numeric(6, 1))   # the day's maximum from our own METAR log
+    own_reports: Mapped[int | None] = mapped_column(Integer)
+    own_label: Mapped[str | None] = mapped_column(String(40))
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index("ix_weather_events_city_date", "city", "local_date"),)
+
+
+class WeatherMetar(Base):
+    """A routine or special airport report, as published. The settlement source for weather markets."""
+    __tablename__ = "weather_metars"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    station: Mapped[str] = mapped_column(String(8))
+    obs_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    temp_c: Mapped[Decimal] = mapped_column(Numeric(6, 1))
+    speci: Mapped[bool] = mapped_column(Boolean, default=False)
+    raw: Mapped[str] = mapped_column(Text, default="")
+    __table_args__ = (UniqueConstraint("station", "obs_time", name="uq_weather_metar_station_time"),)
+
+
+class WeatherSample(Base):
+    """Every 10 minutes per open event: the day's running maximum, the ensemble forecast, the price ladder."""
+    __tablename__ = "weather_samples"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("weather_events.id", ondelete="CASCADE"))
+    ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    running_max_c: Mapped[Decimal | None] = mapped_column(Numeric(6, 1))
+    reports: Mapped[int] = mapped_column(Integer, default=0)
+    forecast: Mapped[list] = mapped_column(JSONB, default=list)        # ensemble members' daily max, °C
+    ladder: Mapped[list] = mapped_column(JSONB, default=list)          # [{label, bid, ask, last}]
+    __table_args__ = (Index("ix_weather_samples_event_ts", "event_id", "ts"),)
 
 
 class PortfolioSnapshot(Base):

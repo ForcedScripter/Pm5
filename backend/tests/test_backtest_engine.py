@@ -67,7 +67,7 @@ def test_fok_depth_and_risk_limits_are_enforced():
 
 
 def test_streak_context_only_uses_rounds_settled_before_now():
-    p = P(streak_reversal=True, streak_length=3)
+    p = P(streak_reversal=True, streak_length=3, min_fair_edge=None)      # a streak bet ignores fair value by design
     # three UP outcomes, but the last one only becomes known AFTER this round → no reversal yet
     settled = [(WS - 1000, "btc", "UP"), (WS - 700, "btc", "UP"), (WS + 10_000, "btc", "UP")]
     d = data([book(WS + 100, 0.50), book(WS + 105, 0.50)], delta=0.0, settled=settled)

@@ -10,8 +10,12 @@ import { Api } from "@/services/api";
 import type { BacktestResults, Metrics } from "@/types/api";
 
 const STRATS = [
-  { value: "constellation", label: "Constellation" }, { value: "custom_btc", label: "Custom BTC" }, { value: "custom_eth", label: "Custom ETH" },
-  { value: "pocket_aces", label: "Pocket Aces" }, { value: "mean_reversion", label: "Mean Reversion" }, { value: "ai_strat", label: "AI Strat" },
+  { value: "binance_lead", label: "Binance Lead" },
+  { value: "twap_lock", label: "TWAP Lock" },
+  { value: "constellation", label: "Constellation" },
+  { value: "odds_scalper", label: "Odds Scalper" },
+  { value: "pocket_aces", label: "Pocket Aces" },
+  { value: "custom_btc", label: "Custom BTC" },
 ];
 const pct = (v?: number | null, d = 1) => (v == null ? "—" : `${(v * 100).toFixed(d)}%`);
 const num = (v?: number | null, d = 2) => (v == null ? "—" : v.toFixed(d));

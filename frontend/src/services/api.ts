@@ -1,5 +1,5 @@
 import { useAuth } from "@/stores/auth";
-import type { BackfillProgress, BacktestDetail, BacktestSummary, Coverage, AiModels, EngineStatus, HealthOut, LogEntry, OrderRow, Portfolio, PositionRow, Readiness, SettingsOut, SignalRow, Strategy, StrategyStats, TradeRow, TrainResult, WalletOut } from "@/types/api";
+import type { BackfillProgress, BacktestDetail, BacktestSummary, Coverage, AiModels, EngineStatus, HealthOut, LogEntry, MakerRound, MakerStat, StrikeEngineStatus, StrikeMarketRow, StrikePositionRow, StrikeStats, WeatherSummary, ArbPairRow, ArbStats, OrderRow, Scoreboard, Portfolio, PositionRow, Readiness, SettingsOut, SignalRow, Strategy, StrategyStats, TradeRow, TrainResult, WalletOut } from "@/types/api";
 
 export class ApiError extends Error {
   status: number;
@@ -69,6 +69,16 @@ export const Api = {
   aiModels: () => api<AiModels>("/api/ai/models"),
   aiTrain: (kind: "logreg" | "gbm", days: number) => api<TrainResult>("/api/ai/train", { method: "POST", json: { kind, days } }),
   portfolio: (mode?: string) => api<Portfolio>(`/api/portfolio${mode ? `?mode=${mode}` : ""}`),
+  scoreboard: (mode = "paper") => api<Scoreboard>(`/api/scoreboard?mode=${mode}`),
+  arbPairs: (mode = "paper", limit = 50) => api<ArbPairRow[]>(`/api/arb/pairs?mode=${mode}&limit=${limit}`),
+  arbStats: (mode = "paper") => api<ArbStats>(`/api/arb/stats?mode=${mode}`),
+  weatherSummary: () => api<WeatherSummary>("/api/weather/summary"),
+  strikeMarkets: () => api<{ status: StrikeEngineStatus | null; markets: StrikeMarketRow[] }>("/api/strikes/markets"),
+  strikePositions: (mode = "paper", limit = 100) => api<StrikePositionRow[]>(`/api/strikes/positions?mode=${mode}&limit=${limit}`),
+  strikeStats: (mode = "paper") => api<StrikeStats>(`/api/strikes/stats?mode=${mode}`),
+  makerRounds: (mode = "paper", limit = 50) => api<MakerRound[]>(`/api/maker/rounds?mode=${mode}&limit=${limit}`),
+  makerStats: (mode = "paper") => api<{ mode: string; stats: MakerStat[]; disclaimer: string }>(`/api/maker/stats?mode=${mode}`),
+  resetBook: () => api<Portfolio>("/api/portfolio/reset?mode=paper", { method: "POST" }),   // paper only
   positions: (mode: string, status = "open") => api<PositionRow[]>(`/api/positions?mode=${mode}&status=${status}`),
   orders: (mode: string, limit = 100) => api<OrderRow[]>(`/api/orders?mode=${mode}&limit=${limit}`),
   trades: (q: { mode: string; asset?: string; strategy?: string; result?: string; from?: string; to?: string }) => {

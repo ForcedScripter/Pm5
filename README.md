@@ -9,19 +9,32 @@ encrypted, and the console is reachable only from that machine.
 > and the backtest on real order books is still too small to judge (see `docs/backtesting.md`).
 > Run it on paper for days before ever considering real money.
 
-## Install (once)
+## Quick Start: Run Locally on Windows (No Docker)
+
+If you don't use Docker or prefer running directly on your system:
+
+1. Run the local setup script in PowerShell:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\setup-local.ps1
+   ```
+   *This automatically initializes local PostgreSQL in `.pgdata`, sets up the Python virtual environment (`.venv`), installs all backend dependencies with in-memory Redis fallback, compiles the React frontend into `frontend/dist`, and prints your admin login.*
+
+2. Start the local server:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\start-local.ps1
+   ```
+3. Open **http://localhost:8000** and sign in as `admin`.
+4. When done, stop background services:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\stop-local.ps1
+   ```
+
+---
+
+## Alternative: Run with Docker Desktop
 
 1. Install **Docker Desktop** (Windows/Mac) from https://www.docker.com/products/docker-desktop/ and start it.
-   - Windows: let it enable WSL 2 if it asks.
-   - In Docker Desktop → Settings → General, tick **Start Docker Desktop when you sign in**, so the bot comes back after a reboot.
-2. Install **Git** (https://git-scm.com/downloads) and download the code:
-   ```bash
-   git clone https://github.com/ForcedScripter/Pm5 pm5bot
-   ```
-   ```bash
-   cd pm5bot
-   ```
-3. Run the setup script. It creates `.env` with random secrets, builds and starts everything, and prints your login. The first build takes about 5–10 minutes.
+2. Run the Docker setup script:
    - **Windows (PowerShell):**
      ```powershell
      powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
@@ -30,10 +43,9 @@ encrypted, and the console is reachable only from that machine.
      ```bash
      bash scripts/setup.sh
      ```
-4. Open **http://localhost:8080** and sign in as `admin` with the printed password. It's also in `.env` as `ADMIN_PASSWORD`.
+3. Open **http://localhost:8080** and sign in as `admin`.
 
-**Back up your `.env`** (for example to a USB stick or password manager). Its `MASTER_KEY` is the
-only way to decrypt the wallet key you save in the console.
+---
 
 ## Use it
 
@@ -47,52 +59,32 @@ awake: set Windows/macOS sleep to *Never* while plugged in if you want it runnin
 
 ## Everyday commands
 
-Run these from the `pm5bot` folder:
-
-| | Windows (PowerShell) | Mac / Linux |
+| | Local (No Docker) | Docker |
 |---|---|---|
-| Update to the latest version | `powershell -ExecutionPolicy Bypass -File scripts\update.ps1` | `bash scripts/update.sh` |
-| Back up the database | `powershell -ExecutionPolicy Bypass -File scripts\backup.ps1` | `bash scripts/backup.sh` |
-| Stop (keeps all data) | `docker compose stop` | `docker compose stop` |
-| Start again | `docker compose start` | `docker compose start` |
-| See logs | `docker compose logs -f backend` | `docker compose logs -f backend` |
+| Start instance | `powershell -File scripts\start-local.ps1` | `docker compose start` |
+| Stop instance | `powershell -File scripts\stop-local.ps1` | `docker compose stop` |
+| Backup database | `powershell -File scripts\backup.ps1` | `powershell -File scripts\backup.ps1` |
+| Update code | `git pull` | `powershell -File scripts\update.ps1` |
 
-Updating keeps your trades, settings and wallet (they live in Docker volumes and `.env`).
-**Don't delete `.env`:** the database password and wallet encryption key are in it.
+## Running the tests
 
-## If something's wrong
+The backend tests need a Postgres database named `pm5_test` (point `TEST_DATABASE_URL` at it if it
+isn't on `localhost:5432`, e.g. the local server from `setup-local.ps1` on port 5433):
 
-- **Settings → Server status** shows the database, Redis and each live feed (Binance prices, Polymarket books, market discovery) with its last error.
-- **"Docker is not running":** start Docker Desktop and wait for it to say *running*.
-- **Port 8080 already in use:** change `"127.0.0.1:8080:8080"` in `docker-compose.yml` to, say, `"127.0.0.1:8090:8080"`, then open http://localhost:8090.
-- **Feeds show "down":** check your internet connection. A VPN or firewall must allow `data-stream.binance.vision`, `clob.polymarket.com` and `gamma-api.polymarket.com`. Polymarket is not available in every country.
+```powershell
+.\.venv\Scripts\pip install -r backend\requirements-dev.txt
+cd backend
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://postgres@127.0.0.1:5433/pm5_test"
+..\.venv\Scripts\python -m pytest -q --ignore=tests/live
+cd ..\frontend; npx vitest run; npx tsc -b
+```
 
 ## Safety on your PC
 
 - Everything listens on **127.0.0.1 only**, so other devices on your network can't reach the console or the database.
 - The wallet key is encrypted with `MASTER_KEY` before it's stored. It's never shown again, never logged, and never sent anywhere except to sign orders with Polymarket's official SDK.
+- The server refuses to start if `MASTER_KEY` is missing or `JWT_SECRET` is shorter than 32 characters.
+- **Keep this folder out of OneDrive, Dropbox and similar sync tools.** `.env` holds `MASTER_KEY` and `JWT_SECRET`; a synced copy puts them in the cloud. Back up `MASTER_KEY` offline instead.
+- After your first login you can delete the `ADMIN_PASSWORD` line from `.env`; it is only read when the account is first created.
+- New local installs give the Postgres database a random password (stored in `%LOCALAPPDATA%\pm5bot\pg.password`). An install made before this change still uses no password; to switch, back up, delete `%LOCALAPPDATA%\pm5bot\pgdata`, and run `setup-local.ps1` again.
 - Use a **dedicated wallet** with only what you can afford to lose. If you ever pasted a key into another website, consider that wallet compromised.
-
-## Docs
-
-| | |
-|---|---|
-| `docs/strategies.md` | What each strategy does and its settings |
-| `docs/execution.md` | Orders, fees, risk limits, going live (checklist) |
-| `docs/backtesting.md` | Backtesting, data quality, and why backfilled data is biased |
-| `docs/architecture.md` | How it works inside |
-| `docs/api_documentation.md` | API reference |
-| `docs/reverse_engineering.md` | Notes on the reference app this was modelled on |
-
-## For developers
-
-Backend: Python 3.12+, FastAPI, Postgres, Redis (`backend/`). Frontend: React + Vite (`frontend/`).
-
-```bash
-cd backend && python -m pytest
-```
-```bash
-cd frontend && npx vitest run
-```
-
-Live-feed checks: `RUN_LIVE=1 python -m pytest tests/live`.

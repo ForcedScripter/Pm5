@@ -47,6 +47,11 @@ class SpotInfo:
     bid: float | None = None
     ask: float | None = None
     change_24h: float | None = None
+    updated: float = 0.0             # wall time of the last bookTicker (spot freshness for the maker)
+
+    @property
+    def mid(self) -> float | None:
+        return (self.bid + self.ask) / 2 if self.bid and self.ask else None
 
 
 @dataclass

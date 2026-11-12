@@ -37,7 +37,7 @@ from app.strategies.engine.dca import PositionState, plan_next
 from app.strategies.engine.rules import RULE_STRATEGIES
 
 log = logging.getLogger(__name__)
-STRATEGIES = {**RULE_STRATEGIES, "ai_strat": ai_strat}
+STRATEGIES = RULE_STRATEGIES
 SETTLE_DELAY = 300
 EXEC_WINDOW_S = 5          # recorded books are 5s apart: a fill must happen within one step of the latency
 BACKFILL_ADVERSE = 0.01    # extra cost per share on backfilled fills (signal-time price, coarse data)
@@ -214,7 +214,8 @@ def simulate(data: HistData, strategies: list[str], params: dict[str, dict], ris
         limit = min(0.99, limit_px if limit_px is not None else ask + p_cfg.get("slippage", 0.02))
         intent = OrderIntent(purpose, r.id, side, usd, ask, bid, limit, r.ws + 300 - t, position_cost=pos_cost,
                              book_synced=True, book_age_s=0.0, spread=(ask - bid) if bid is not None else None,
-                             ask_depth=depth if depth is not None else 1e9, fee_rate=r.fee_rate, fee_exponent=r.fee_exp)
+                             ask_depth=depth if depth is not None else 1e9, fee_rate=r.fee_rate, fee_exponent=r.fee_exp,
+                             min_secs_before_close=p_cfg.get("min_seconds_before_close") if purpose == "entry" else None)
         res = check(risk, state(t), intent, now=t, emergency_stopped=False)
         if not res.ok:
             risk_blocks[res.rule] += 1

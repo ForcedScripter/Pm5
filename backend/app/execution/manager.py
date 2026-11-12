@@ -35,9 +35,14 @@ from app.portfolio import service as pf
 from app.risk.engine import OrderIntent, check
 from app.services import wallet as wallet_svc
 from app.strategies.engine.dca import PositionState, plan_next
+from app.strategies.engine.base import entry_stake
+from app.strategies.fair_value import strike_of
 
 log = logging.getLogger(__name__)
 D = lambda v: Decimal(str(round(float(v), 6)))  # noqa: E731
+# Strategies with their own engine place their own orders. Their signals are "accepted" for a moment
+# before being marked "executed", and this manager must not pick them up in that gap and enter twice.
+SELF_EXECUTING = ("odds_scalper", "spork_maker", "crypto_strikes")
 SIGNAL_TTL_S = 6          # an accepted signal older than this is stale: prices moved, don't chase it
 
 
@@ -48,10 +53,12 @@ class OrderManager:
         self.live: dict[uuid.UUID, LiveExecutor] = {}
         self._handled: set[uuid.UUID] = set()
         self._cancelled_for: set[uuid.UUID] = set()
+        self._breach_since: dict[uuid.UUID, float] = {}   # position → when spot first crossed the strike against it
         self._last_snapshot: dict[tuple, float] = {}
         self._last_confirm = 0.0
         self._last_reconcile = 0.0
         self.status = {"last_tick": None, "orders": 0, "errors": 0, "last_error": None}
+        self.wake = asyncio.Event()             # set by the strategy runner the moment it accepts a signal
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -59,9 +66,17 @@ class OrderManager:
 
     async def run(self) -> None:
         while not self._stop.is_set():
-            await asyncio.sleep(1.0 - (time.time() % 1.0) + 0.45)      # after the strategy runner
+            # Full pass once a second (exits, DCA, settlement, snapshots). A new signal doesn't wait for it:
+            # the runner sets `wake` and the entry is placed straight away.
+            fast = False
             try:
-                await self.tick()
+                await asyncio.wait_for(self.wake.wait(), timeout=1.0 - (time.time() % 1.0) + 0.45)
+                fast = True
+            except asyncio.TimeoutError:
+                pass
+            self.wake.clear()
+            try:
+                await self.tick(entries_only=fast)
             except Exception as e:  # noqa: BLE001
                 self.status["errors"] += 1
                 self.status["last_error"] = f"{type(e).__name__}: {e}"[:200]
@@ -106,10 +121,17 @@ class OrderManager:
             return None
 
     # ── main tick ───────────────────────────────────────────────────────
-    async def tick(self) -> None:
+    async def tick(self, entries_only: bool = False) -> None:
         self.status["last_tick"] = time.time()
         async with SessionLocal() as db:
             users = (await db.execute(select(UserSettings))).scalars().all()
+            if entries_only:
+                for us in users:
+                    if us.bot_running and not us.emergency_stopped:
+                        mode, ex = await self.mode_and_executor(db, us)
+                        await self.process_signals(db, us, mode, ex)
+                await db.commit()
+                return
             for us in users:
                 mode, ex = await self.mode_and_executor(db, us)
                 if us.emergency_stopped:
@@ -153,6 +175,7 @@ class OrderManager:
     async def process_signals(self, db, us, mode, ex) -> None:
         cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=SIGNAL_TTL_S)
         sigs = (await db.execute(select(Signal).where(Signal.user_id == us.user_id, Signal.status == "accepted",
+                                                      Signal.strategy_key.notin_(SELF_EXECUTING),
                                                       Signal.created_at >= cutoff).order_by(Signal.created_at))).scalars().all()
         for sig in sigs:
             if sig.id in self._handled:
@@ -174,6 +197,8 @@ class OrderManager:
         exists = (await db.execute(select(Position.id).where(Position.user_id == us.user_id, Position.mode == mode,
                                                              Position.market_id == m.id, Position.side == sig.side))).first()
         if exists:
+            self._log(db, us.user_id, "info", "skip", f"[{sig.strategy_key}] {sig.asset.upper()} {sig.side}: already holding "
+                      "this side of the round (one position per market and side)", signal_id=sig.id)
             return
         cfg = await db.get(StrategyConfiguration, sig.strategy_config_id)
         p = cfg.params
@@ -181,11 +206,17 @@ class OrderManager:
         ob = self._book(token)
         summ = ob.summary() if ob else {}
         ask = summ.get("ask")
-        amount = float(p["dca"]["stages"][0])
+        amount = entry_stake(p)
         limit = round(min(0.99, (ask or 0) + p.get("slippage", 0.02)), 2)
         intent = OrderIntent("entry", str(m.id), sig.side, amount, ask, summ.get("bid"), limit, info.end - time.time(),
                              book_synced=bool(summ.get("synced")), book_age_s=summ.get("age_s"), spread=summ.get("spread"),
-                             ask_depth=float(summ.get("ask_depth") or 0), fee_rate=float(m.fee_rate), fee_exponent=float(m.fee_exponent))
+                             ask_depth=float(summ.get("ask_depth") or 0), fee_rate=float(m.fee_rate), fee_exponent=float(m.fee_exponent),
+                             min_secs_before_close=p.get("min_seconds_before_close"))
+        if mode == "live":
+            dec = await pf.edge_decay(db, us.user_id, sig.strategy_key, us.risk)
+            if dec["paused"]:
+                return await self._blocked(db, us, "edge_decay", f"{sig.strategy_key} paused for live: mean P&L "
+                                           f"${dec['mean_pnl']:+.2f} over its last {dec['n']} trades", dec, signal_id=sig.id)
         st, _ = await pf.state(db, us.user_id, mode, self._marks(), await self._live_cash(ex))
         r = check(us.risk, st, intent, now=time.time(), emergency_stopped=us.emergency_stopped)
         if not r.ok:
@@ -209,9 +240,15 @@ class OrderManager:
         order.position_id = pos.id
         sig.status = "executed"
         avg = res.cost / res.shares
+        t_sig = (sig.features or {}).get("t")
+        lat = f", {max(0.0, time.time() - float(t_sig)) * 1000:.0f} ms after the trigger" if t_sig else ""
+        if t_sig:
+            ms = max(0.0, time.time() - float(t_sig)) * 1000
+            self.status["entry_latency_ms"] = round(ms, 1)
+            self.status["entry_latency_ms_max"] = round(max(self.status.get("entry_latency_ms_max", 0.0), ms), 1)
         self._log(db, us.user_id, "info", "fill",
                   f"[{sig.strategy_key}] BUY {sig.asset.upper()} {sig.side} {res.shares:.2f} sh @ {avg * 100:.1f}¢ = ${res.cost:.2f} "
-                  f"+ ${res.fees:.3f} fee ({mode})", signal_id=sig.id, order_id=order.id, position_id=pos.id)
+                  f"+ ${res.fees:.3f} fee ({mode}{lat})", signal_id=sig.id, order_id=order.id, position_id=pos.id)
         self.emit({"type": "position", "event": "opened", "mode": mode, "asset": sig.asset, "side": sig.side,
                    "shares": res.shares, "avg": avg, "strategy": sig.strategy_key})
         await db.commit()
@@ -225,6 +262,7 @@ class OrderManager:
             await db.commit()                       # committed BEFORE submission: the idempotency guarantee
         except IntegrityError:
             await db.rollback()
+            await db.refresh(us)                    # a rollback expires loaded rows; the tick still needs this one
             log.info("order %s already exists; not resending", key)
             return None
         self.status["orders"] += 1
@@ -261,20 +299,31 @@ class OrderManager:
             summ = ob.summary()
             p = (await db.get(StrategyConfiguration, pos.strategy_config_id)).params
             m = await db.get(Market, pos.market_id)
-            ex_cfg = p["exits"]
+            ex_cfg = p.get("exits")
             bid, ask = summ["bid"], summ["ask"]
             secs_left = end - now
             # exits first (risk-reducing)
-            if bid is not None and secs_left > ex_cfg.get("no_exit_last_s", 20):
+            if ex_cfg and bid is not None and secs_left > ex_cfg.get("no_exit_last_s", 20):
                 sl, tp = ex_cfg.get("stop_loss"), ex_cfg.get("take_profit")
                 floor = (sl or 0) - ex_cfg.get("stop_floor_gap", 0.05)
                 if sl and bid <= sl and bid >= floor:
                     await self._exit(db, us, mode, ex, pos, m, "stop", max(0.01, floor), summ, f"stop-loss: bid {bid:.2f} ≤ {sl:.2f}")
                     continue
-                if tp and bid >= tp:
+                if tp and bid >= tp and tp > float(pos.first_entry_price):
                     await self._exit(db, us, mode, ex, pos, m, "take_profit", round(tp - 0.01, 2), summ, f"take-profit: bid {bid:.2f} ≥ {tp:.2f}")
                     continue
+                # Strike-crossing signal stop: exit when spot has crossed the strike against us by more
+                # than a bps buffer, late in the round, and the breach has PERSISTED for confirm_s.
+                # npcnpc09 measured the naive first-breach version whipsawing winners into losses live;
+                # the confirmed one cut real reversals while dodging those. Off by default.
+                if ex_cfg.get("strike_crossing_stop", False):
+                    if await self._strike_stop(db, us, mode, ex, pos, m, ex_cfg, summ, bid, end, secs_left, now):
+                        continue
+                else:
+                    self._breach_since.pop(pos.id, None)
             # DCA
+            if "dca" not in p or p["dca"].get("mode") == "off":
+                continue
             buf = self.hub.bars.get(pos.asset)
             delta = features(buf, int(now) // 300 * 300).get("window_delta") if buf and buf.last else None
             shares, cost = float(pos.shares), float(pos.cost_basis)
@@ -342,6 +391,36 @@ class OrderManager:
         await db.commit()
 
     # ── settlement ─────────────────────────────────────────────────────
+    def breach_state(self, pid: uuid.UUID, crossed: bool, now: float, confirm_s: float) -> bool:
+        """Track how long a breach has lasted; True once it has persisted ≥ confirm_s."""
+        if not crossed:
+            self._breach_since.pop(pid, None)
+            return False
+        since = self._breach_since.setdefault(pid, now)
+        return now - since >= confirm_s - 1e-9
+
+    async def _strike_stop(self, db, us, mode, ex, pos, m, ex_cfg, summ, bid, end, secs_left, now) -> bool:
+        held_s = (now - pos.created_at.timestamp()) if pos.created_at else 999.0
+        if secs_left > ex_cfg.get("strike_crossing_s", 60) or held_s < ex_cfg.get("min_hold_s", 30):
+            self._breach_since.pop(pos.id, None)
+            return False
+        buf = self.hub.bars.get(pos.asset)
+        feat = features(buf, int(end - 300)) if buf and buf.last else {}
+        spot, strike = feat.get("price"), strike_of(feat)
+        if spot is None or not strike:
+            return False
+        buf_bps = ex_cfg.get("strike_crossing_buffer_bps", 5.0)
+        r = buf_bps / 10000.0
+        crossed = (pos.side == "UP" and spot < strike * (1 - r)) or (pos.side == "DOWN" and spot > strike * (1 + r))
+        confirm = ex_cfg.get("strike_crossing_confirm_s", 10.0)
+        if not self.breach_state(pos.id, crossed, now, confirm) or bid < 0.05:
+            return False
+        self._breach_since.pop(pos.id, None)
+        await self._exit(db, us, mode, ex, pos, m, "stop", max(0.01, round(bid - 0.02, 2)), summ,
+                         f"signal-stop: spot {spot:.2f} stayed across strike {strike:.2f} by >{buf_bps:.1f}bps "
+                         f"for {confirm:.0f}s ({pos.side}, {secs_left:.0f}s left)")
+        return True
+
     async def settle(self, db) -> None:
         rows = (await db.execute(select(Position, Market.winner).join(Market, Market.id == Position.market_id)
                                  .where(Position.status.in_(pf.OPEN), Market.closed, Market.winner.is_not(None)))).all()

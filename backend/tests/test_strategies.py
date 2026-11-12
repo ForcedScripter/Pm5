@@ -4,7 +4,7 @@ import pytest
 
 from app.strategies.catalog import defaults
 from app.strategies.engine.base import AssetView, Book, Context, MarketView
-from app.strategies.engine.rules import btc_regime, constellation, directional, mean_reversion, rsi
+from app.strategies.engine.rules import btc_regime, constellation, directional
 
 WS = int(dt.datetime(2026, 11, 3, 10, 0, tzinfo=dt.UTC).timestamp())   # 10:00 UTC (not a skip hour)
 
@@ -120,28 +120,104 @@ def test_custom_bias_cooldown_confidence():
 
 def test_pocket_aces_only_near_certain_prices():
     p = P("pocket_aces")
-    assert directional("pocket_aces", p, view({"btc": 0.2}, {"btc": (0.55, 0.45)}), Context())[0].code == "band"
-    assert directional("pocket_aces", p, view({"btc": 0.2}, {"btc": (0.8, 0.2)}), Context())[0].status == "accepted"
+    # first check is at 120s into the round; band is 60-75 cents
+    assert directional("pocket_aces", p, view({"btc": 0.2}, {"btc": (0.70, 0.30)}), Context())[0].code == "too_early"
+    assert directional("pocket_aces", p, view({"btc": 0.2}, {"btc": (0.55, 0.45)}, secs_in=150), Context())[0].code == "band"
+    assert directional("pocket_aces", p, view({"btc": 0.2}, {"btc": (0.80, 0.20)}, secs_in=150), Context())[0].code == "band"
+    assert directional("pocket_aces", p, view({"btc": 0.2}, {"btc": (0.70, 0.30)}, secs_in=150), Context())[0].status == "accepted"
 
 
-# --- Mean reversion ---
-def test_mean_reversion_fades_overextension():
-    p = P("mean_reversion", assets=["btc"])
-    # delta 0.30% after 100s with 60s vol 0.05% → z = 0.3 / (0.05 * sqrt(1.67)) ≈ 4.6
-    (d,) = mean_reversion(p, view({"btc": 0.30}, vol=0.05), Context())
-    assert d.side == "DOWN" and d.status == "accepted" and d.features["z"] > 4
-    assert mean_reversion(p, view({"btc": 0.02}, vol=0.05), Context()) == []         # not overextended
-    assert mean_reversion(p, view({"btc": 0.30}, vol=0.01), Context())[0].code == "volatility"
-
-
-def test_rsi_and_regime_helpers():
-    assert rsi([1, 2, 3, 4, 5, 6], 5) == 100.0
-    assert rsi([6, 5, 4, 3, 2, 1], 5) == 0.0
-    assert rsi([1, 2], 5) is None
+def test_regime_helper_and_retired_strategy():
+    from app.strategies.catalog import CATALOG
+    from app.strategies.engine.rules import RULE_STRATEGIES
+    assert "mean_reversion" not in CATALOG and "mean_reversion" not in RULE_STRATEGIES
     assert btc_regime(view({"btc": 0}, ret_1h=-2.5))["state"] == "OVERSOLD"
 
 
-@pytest.mark.parametrize("key", ["constellation", "custom_btc", "custom_eth", "pocket_aces", "mean_reversion"])
+@pytest.mark.parametrize("key", ["binance_lead", "constellation", "custom_btc", "pocket_aces", "twap_lock"])
 def test_every_rule_strategy_runs_on_empty_market(key):
     from app.strategies.engine.rules import RULE_STRATEGIES
     assert RULE_STRATEGIES[key](defaults(key), MarketView(WS + 100, WS, {}), Context()) == []
+
+
+# --- Binance lead ---
+def test_binance_lead_confirms_then_runs_shared_gates():
+    """Regression: its params once lacked Common's keys, so decide() raised KeyError on the first signal."""
+    from app.strategies.engine.rules import binance_lead_rule
+    ws = WS + 7 * 300                                    # its own round: the lead tracker is module state
+    p = P("binance_lead", assets=["btc"])
+    assert p["lead_threshold_bps"] == 12.0
+
+    def v(secs_in, ask, px=100.15):
+        av = AssetView("btc", px, {"window_open": 100.0, "window_delta": 0.15}, "m-btc", ws, book(ask), book(1 - ask))
+        return MarketView(now=ws + secs_in, window_start=ws, assets={"btc": av})
+
+    assert binance_lead_rule(p, v(20, 0.70), Context()) == []            # 15 bps lead seen: waiting to confirm
+    (d,) = binance_lead_rule(p, v(31, 0.70), Context())                  # held for 10s: confirmed
+    assert d.status == "accepted" and d.side == "UP" and d.stake_usd == 5 and 0.02 < d.features["edge"] < 0.15
+    (d,) = binance_lead_rule(p, v(32, 0.80), Context())                  # ask already repriced above the cap
+    assert d.status == "rejected" and d.code == "already_repriced"
+    (d,) = binance_lead_rule(p, v(33, 0.55), Context())                  # fair ~0.84 vs 0.55: 29c "edge" = model error
+    assert d.status == "rejected" and d.code == "model_disagrees"
+    assert binance_lead_rule(p, v(34, 0.70), Context(accepted_this_window={("binance_lead", "btc"): 1})) == []
+
+
+def test_binance_lead_ignores_leads_under_12_bps():
+    from app.strategies.engine.rules import binance_lead_rule
+    ws = WS + 9 * 300
+    p = P("binance_lead", assets=["btc"])
+    av = AssetView("btc", 100.10, {"window_open": 100.0, "window_delta": 0.1}, "m-btc", ws, book(0.6), book(0.4))
+    for t in (20, 31, 45):                               # 10 bps: Binance/Chainlink can still disagree here
+        assert binance_lead_rule(p, MarketView(now=ws + t, window_start=ws, assets={"btc": av}), Context()) == []
+
+
+def test_binance_lead_rejects_spikes():
+    from app.strategies.engine.rules import binance_lead_rule
+    ws = WS + 8 * 300
+    p = P("binance_lead", assets=["btc"])
+
+    def v(secs_in, px):
+        av = AssetView("btc", px, {"window_open": 100.0, "window_delta": 0}, "m-btc", ws, book(0.55), book(0.45))
+        return MarketView(now=ws + secs_in, window_start=ws, assets={"btc": av})
+
+    assert binance_lead_rule(p, v(20, 100.15), Context()) == []
+    assert binance_lead_rule(p, v(31, 100.0), Context()) == []           # lead gone at confirmation: spike
+    assert binance_lead_rule(p, v(40, 100.2), Context()) == []           # and the round stays closed
+
+
+def test_confirmed_strike_stop_needs_a_persistent_breach():
+    import uuid as _u
+
+    from app.execution.manager import OrderManager
+    om = OrderManager.__new__(OrderManager)
+    om._breach_since = {}
+    pid = _u.uuid4()
+    assert not om.breach_state(pid, True, 100.0, 10)      # breach starts
+    assert not om.breach_state(pid, True, 105.0, 10)      # 5s: not yet
+    assert not om.breach_state(pid, False, 106.0, 10)     # flicker back: timer resets
+    assert not om.breach_state(pid, True, 107.0, 10)
+    assert not om.breach_state(pid, True, 116.0, 10)
+    assert om.breach_state(pid, True, 117.0, 10)          # held 10s → stop
+
+
+def test_strike_stop_is_off_by_default():
+    for key in ("pocket_aces", "binance_lead"):
+        assert defaults(key)["exits"]["strike_crossing_stop"] is False
+
+
+def test_fair_probability_symmetry_and_limits():
+    from app.strategies.fair_value import compute_fair_probability
+    assert compute_fair_probability(100, 100, 200) == (0.5, 0.5)
+    up, dn = compute_fair_probability(100.1, 100, 200)
+    assert up > 0.5 and up + dn == pytest.approx(1.0)
+    assert compute_fair_probability(99.9, 100, 200)[0] == pytest.approx(dn, abs=1e-3)
+    assert compute_fair_probability(101, 100, 5)[0] == 0.99                # clipped
+    assert compute_fair_probability(None, 100, 200) == (0.5, 0.5)
+
+
+def test_fair_value_uses_per_asset_volatility():
+    from app.strategies.fair_value import VOL_CAP, VOL_FLOOR, annual_vol, compute_fair_probability
+    assert annual_vol(None) is None and annual_vol(0.0001) == VOL_FLOOR and annual_vol(50) == VOL_CAP
+    calm = compute_fair_probability(100.1, 100, 200, annual_vol(0.05))[0]
+    wild = compute_fair_probability(100.1, 100, 200, annual_vol(0.30))[0]
+    assert 0.5 < wild < calm                     # same lead is less certain on a more volatile coin

@@ -48,6 +48,8 @@ class MarketInfo:
     liquidity: float = 0.0
     fee_rate: float = 0.07
     fee_exponent: float = 1.0
+    rewards_min_size: float = 0.0      # shares a resting order needs to earn liquidity rewards (0 = none)
+    rewards_max_spread: float = 0.0    # how far from the midpoint it may rest, in price (0.045 = 4.5¢)
 
     def token(self, side: str) -> str:
         return self.up_token if side == "UP" else self.down_token
@@ -80,6 +82,8 @@ def parse_gamma_event(asset: str, start: int, events: list) -> dict | None:
             "neg_risk": bool(m.get("negRisk")), "resolution_source": m.get("resolutionSource"),
             "closed": bool(m.get("closed")), "winner": winner,
             "liquidity": float(m.get("liquidityClob") or m.get("liquidity") or 0),
+            "rewards_min_size": float(m.get("rewardsMinSize") or 0),
+            "rewards_max_spread": float(m.get("rewardsMaxSpread") or 0) / 100.0,      # Gamma gives cents
             "fees_enabled": bool(m.get("feesEnabled", True)),
             "fee_rate": float((m.get("feeSchedule") or {}).get("rate", 0.07)) if m.get("feesEnabled", True) else 0.0,
             "fee_exponent": float((m.get("feeSchedule") or {}).get("exponent", 1))}
@@ -196,4 +200,5 @@ async def upsert_market(f: dict) -> MarketInfo:
         await db.commit()
     return MarketInfo(mid, f["asset"], f["slug"], f["question"], f["start"], f["start"] + WINDOW, f["condition_id"],
                       f["up_token"], f["down_token"], f["tick_size"], f["min_size"], f["liquidity"],
-                      f.get("fee_rate", 0.07), f.get("fee_exponent", 1.0))
+                      f.get("fee_rate", 0.07), f.get("fee_exponent", 1.0),
+                      f.get("rewards_min_size", 0.0), f.get("rewards_max_spread", 0.0))

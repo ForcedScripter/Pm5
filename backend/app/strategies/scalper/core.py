@@ -141,8 +141,9 @@ def exit_step(p: dict, ex: ExitTracker, k: Tick) -> tuple[str, str] | None:
 
     if k.bid <= ex.entry_price - p["stop_loss_cents"] * TICK + 1e-9:
         return "exit", f"stop-loss: bid {k.bid * 100:.0f}¢ ≤ entry {ex.entry_price * 100:.0f}¢ − {p['stop_loss_cents']}¢ ({net:+.2f})"
+    min_breathe = p.get("min_hold_before_adverse_s", 8.0)
     oldest = ex.bids[0][1]
-    if oldest - k.bid >= p["adverse_drop_cents"] * TICK - 1e-9 and net < 0:
+    if held >= min_breathe and oldest - k.bid >= p["adverse_drop_cents"] * TICK - 1e-9 and net < 0:
         return "exit", f"adverse momentum: bid fell {(oldest - k.bid) * 100:.0f}¢ in {p['adverse_window_s']}s ({net:+.2f})"
     if k.bid_size < ex.shares * p["min_exit_depth_ratio"] and net >= 0:
         return "exit", f"buyers thinning ({k.bid_size:.0f} sh at the bid): taking {net:+.2f}"

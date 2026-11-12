@@ -106,7 +106,8 @@ class BinanceCollector:
             for b in self.hub.bars[asset].add(p["bar"]):
                 self.pending.append((asset, b))
         elif kind == "book":
-            self.hub.spot[asset].bid, self.hub.spot[asset].ask = p["bid"], p["ask"]
+            sp = self.hub.spot[asset]
+            sp.bid, sp.ask, sp.updated = p["bid"], p["ask"], time.time()
         elif kind == "ticker":
             self.hub.spot[asset].change_24h = p["change_24h"]
 

@@ -151,10 +151,14 @@ function OpenPositions() {
   const mode = pf.data?.mode ?? "paper";
   const q = useQuery({ queryKey: ["positions", mode], queryFn: () => Api.positions(mode), refetchInterval: 3000 });
   return (
-    <Panel>
-      <PanelHeader icon={<Briefcase />} title="Positions open" right={<Link to="/history" className="font-num text-[11px] font-semibold tracking-wider text-tx-mid uppercase hover:text-amber">History ›</Link>} />
+    <Panel className="flex flex-col">
+      <PanelHeader
+        icon={<Briefcase />}
+        title={`Positions open${q.data?.length ? ` (${q.data.length})` : ""}`}
+        right={<Link to="/history" className="font-num text-[11px] font-semibold tracking-wider text-tx-mid uppercase hover:text-amber">History ›</Link>}
+      />
       {!q.data?.length ? <Empty>Nothing open right now.</Empty> : (
-        <div className="divide-y divide-line">
+        <div className="max-h-[260px] min-h-0 divide-y divide-line overflow-y-auto">
           {q.data.map((p) => (
             <div key={p.id} className="px-4 py-2.5 text-[12px]">
               <div className="flex items-center justify-between">

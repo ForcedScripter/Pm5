@@ -42,6 +42,15 @@ class BacktestIn(BaseModel):
         bad = [s for s in self.strategies if s not in CATALOG]
         if bad:
             raise ValueError(f"unknown strategies: {bad}")
+        if "spork_maker" in self.strategies:
+            raise ValueError("spork_maker can't be backtested: its fills come from live trade prints, which the "
+                             "recorded order books don't contain. Evaluate it forward on paper (History → Maker rounds).")
+        if "pair_arb" in self.strategies:
+            raise ValueError("pair_arb can't be backtested here: it needs both full ask ladders at the same instant, which the "
+                             "recorded snapshots (top of book, sampled) don't hold. Evaluate it forward on paper.")
+        if "crypto_strikes" in self.strategies:
+            raise ValueError("crypto_strikes can't be backtested here: the recorded data covers the 5-minute markets only. "
+                             "Evaluate it forward on paper (History → Crypto strikes).")
         if not self.days and not (self.start and self.end):
             self.days = 1
         return self

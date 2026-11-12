@@ -33,7 +33,7 @@ async def _settings(db, user) -> UserSettings:
 async def _enabled(db, user) -> list[str]:
     return list((await db.execute(select(Strategy.key).join(StrategyConfiguration, StrategyConfiguration.strategy_id == Strategy.id)
                                   .where(StrategyConfiguration.user_id == user.id, StrategyConfiguration.is_current,
-                                         StrategyConfiguration.enabled))).scalars())
+                                         StrategyConfiguration.enabled, Strategy.key.in_(list(CATALOG))))).scalars())
 
 
 @router.post("/paper-trading/start")

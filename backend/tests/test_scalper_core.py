@@ -92,7 +92,10 @@ def test_stop_loss_adverse_momentum_max_hold_and_thin_bids():
     assert "stop-loss" in exit_step(P, ex, Tick(1001, 0, None, 0.25, 0, 500))[1]
     ex = ex_tracker(0.29)
     exit_step(P, ex, Tick(1001, 0, None, 0.29, 0, 500))
-    assert "adverse" in exit_step(P, ex, Tick(1002, 0, None, 0.26, 0, 500))[1]
+    assert exit_step(P, ex, Tick(1002, 0, None, 0.26, 0, 500)) is None     # held 2s < min_hold_before_adverse_s (8s)
+    ex = ex_tracker(0.29)
+    exit_step(P, ex, Tick(1009, 0, None, 0.29, 0, 500))
+    assert "adverse" in exit_step(P, ex, Tick(1010, 0, None, 0.26, 0, 500))[1]
     ex = ex_tracker(0.29)
     assert "max hold" in exit_step(P, ex, Tick(1041, 0, None, 0.29, 0, 500))[1]
     ex = ex_tracker(0.29)

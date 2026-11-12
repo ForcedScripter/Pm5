@@ -15,6 +15,7 @@ from app.database.session import get_db
 from app.market_data.hub import hub
 from app.market_data.service import get_service
 from app.models import Market, Order, OrderFill, Position, Trade, User, UserSettings
+from app.portfolio import scoreboard as sb
 from app.portfolio import service as pf
 
 router = APIRouter(prefix="/api")
@@ -47,6 +48,31 @@ async def portfolio(mode: str | None = Query(None, pattern="^(paper|live)$"), us
     _, summary = await pf.state(db, user.id, mode, _marks(), live_cash)
     if mode == "live" and live_cash is None:
         summary["cash_note"] = "live balance unavailable (wallet not connected or exchange unreachable)"
+    return summary
+
+
+@router.post("/portfolio/reset")
+@router.post("/paper-trading/reset")
+async def reset_portfolio(
+    mode: str = Query("paper", pattern="^paper$"),     # live history is never deleted
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    us = await db.get(UserSettings, user.id)
+    if us and us.bot_running:
+        raise HTTPException(409, "stop the bot before resetting the paper book")
+    # drop only THIS user's paper positions from the scalper's in-memory trackers
+    pids = set((await db.execute(select(Position.id).where(Position.user_id == user.id,
+                                                           Position.mode == mode))).scalars())
+    svc = get_service()
+    scalper = getattr(svc, "scalper", None) if svc else None
+    if scalper:
+        for pid in pids:
+            for d in (scalper.exits, scalper._tokens, scalper._pos_params, getattr(scalper, "_hedge_meta", {})):
+                d.pop(pid, None)
+
+    summary = await pf.reset_book(db, user.id, mode)
+    hub.publish_channel("portfolio", {"type": "portfolio", **summary, "ts": time.time()})
     return summary
 
 
@@ -94,6 +120,13 @@ async def orders(mode: str = Mode, limit: int = 100, user: User = Depends(curren
              "filled_shares": float(o.filled_shares), "filled_cost": float(o.filled_cost), "fees": float(o.fees),
              "status": o.status, "error": o.error, "exchange_order_id": o.exchange_order_id, "fills": fills.get(o.id, []),
              "mode": o.mode} for o, a in rows]
+
+
+@router.get("/scoreboard")
+async def scoreboard(mode: str = Mode, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    """Per strategy: closed trades, win rate vs fee-adjusted breakeven, P&L per trade with a 95% interval,
+    and a verdict under one fixed rule (see portfolio/scoreboard.py)."""
+    return await sb.scoreboard(db, user.id, mode)
 
 
 @router.get("/trades")
