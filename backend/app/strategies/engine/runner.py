@@ -34,7 +34,7 @@ STRATEGIES = RULE_STRATEGIES
 # rejections that aren't "near misses" worth recording: the round's entry window simply isn't open,
 # or there is no market data. Real gates (band, spread, depth, consensus, edge, ...) are recorded.
 NOT_NEAR_MISS = {"too_early", "too_late", "no_book"}
-TICK_HZ = 4                   # strategy evaluations per second
+TICK_HZ = 10                  # strategy evaluations per second (a pass costs ~2 ms; 4 Hz added ~125 ms of average wait)
 LIVE_SPOT_MAX_AGE_S = 1.5     # use the live Binance quote while it is this fresh; else the last closed 1s bar
 
 
